@@ -2,7 +2,10 @@
 
 import { useCallback, useState } from "react";
 import { ArrowCounterClockwise } from "@phosphor-icons/react";
-import { AudioRecorder } from "@/components/audio-recorder";
+import {
+  AudioSourceCard,
+  type AudioReadyMeta,
+} from "@/components/audio-recorder";
 import { PartitionPlayer } from "@/components/partition-player";
 import { PartitionViewer } from "@/components/partition-viewer";
 import { TranscriptionPanel } from "@/components/transcription-panel";
@@ -13,14 +16,21 @@ import type { PartitionResponse } from "@/lib/types/partition";
 
 export function TranscriptionFlow() {
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [audioFilename, setAudioFilename] = useState<string | undefined>();
   const [partition, setPartition] = useState<PartitionResponse | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
 
-  const handleRecordingReady = useCallback((blob: Blob) => {
+  const handleAudioReady = useCallback((blob: Blob, meta?: AudioReadyMeta) => {
     setAudioBlob(blob);
+    setAudioFilename(meta?.filename);
     setPartition(null);
     setTranscribeError(null);
+  }, []);
+
+  const handleAudioCleared = useCallback(() => {
+    setAudioBlob(null);
+    setAudioFilename(undefined);
   }, []);
 
   const handleTranscribe = useCallback(async () => {
@@ -30,7 +40,9 @@ export function TranscriptionFlow() {
     setTranscribeError(null);
 
     try {
-      const result = await transcribeAudio(audioBlob);
+      const result = await transcribeAudio(audioBlob, {
+        filename: audioFilename,
+      });
       setPartition(result);
     } catch (error) {
       const message =
@@ -41,10 +53,11 @@ export function TranscriptionFlow() {
     } finally {
       setIsTranscribing(false);
     }
-  }, [audioBlob]);
+  }, [audioBlob, audioFilename]);
 
   const handleStartOver = () => {
     setAudioBlob(null);
+    setAudioFilename(undefined);
     setPartition(null);
     setTranscribeError(null);
     setIsTranscribing(false);
@@ -54,11 +67,13 @@ export function TranscriptionFlow() {
     <div className="flex w-full flex-col gap-6">
       {!partition && (
         <>
-          <AudioRecorder
-            onRecordingReady={handleRecordingReady}
-            onRecordingCleared={() => setAudioBlob(null)}
+          <AudioSourceCard
+            onAudioReady={handleAudioReady}
+            onAudioCleared={handleAudioCleared}
           />
           <TranscriptionPanel
+            audioBlob={audioBlob}
+            audioFilename={audioFilename}
             disabled={!audioBlob}
             isLoading={isTranscribing}
             error={transcribeError}
@@ -78,7 +93,7 @@ export function TranscriptionFlow() {
             onClick={handleStartOver}
           >
             <ArrowCounterClockwise className="size-4" />
-            Nouvel enregistrement
+            Nouvelle source
           </Button>
         </>
       )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Sparkle } from "@phosphor-icons/react";
+import { Download, Sparkle } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -10,8 +10,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { downloadRecordingBlob } from "@/lib/audio/download";
 
 interface TranscriptionPanelProps {
+  audioBlob?: Blob | null;
+  audioFilename?: string;
   disabled?: boolean;
   isLoading?: boolean;
   error?: string | null;
@@ -19,20 +22,41 @@ interface TranscriptionPanelProps {
 }
 
 export function TranscriptionPanel({
+  audioBlob,
+  audioFilename,
   disabled,
   isLoading,
   error,
   onTranscribe,
 }: TranscriptionPanelProps) {
+  const canExport = Boolean(audioBlob) && !isLoading;
+
+  const handleDownload = () => {
+    if (!audioBlob) return;
+    downloadRecordingBlob(audioBlob, audioFilename);
+  };
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Transcription</CardTitle>
         <CardDescription>
-          Générez une partition à partir de votre enregistrement.
+          Générez une partition à partir de votre enregistrement ou fichier
+          importé.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-12 w-full"
+          disabled={!canExport}
+          onClick={handleDownload}
+        >
+          <Download className="size-4" />
+          Télécharger l&apos;audio
+        </Button>
+
         <Button
           type="button"
           className="min-h-12 w-full"

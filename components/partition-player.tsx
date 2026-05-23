@@ -18,8 +18,14 @@ interface PartitionPlayerProps {
 }
 
 export function PartitionPlayer({ partition }: PartitionPlayerProps) {
-  const { isPlaying, progress, play, pause, stop } =
-    usePartitionPlayer(partition);
+  const {
+    isPlaying,
+    progress,
+    play,
+    pause,
+    stop,
+    isInstrumentLoading,
+  } = usePartitionPlayer(partition);
 
   const handlePlayPause = () => {
     if (isPlaying) {
@@ -40,11 +46,18 @@ export function PartitionPlayer({ partition }: PartitionPlayerProps) {
       <CardContent className="flex flex-col gap-4">
         <Progress value={progress * 100} className="h-2" />
 
+        {isInstrumentLoading ? (
+          <p className="text-muted-foreground text-sm">
+            Chargement du piano…
+          </p>
+        ) : null}
+
         <div className="flex gap-2">
           <Button
             type="button"
             className="min-h-12 flex-1"
             onClick={handlePlayPause}
+            disabled={isInstrumentLoading}
           >
             {isPlaying ? (
               <>
@@ -64,6 +77,7 @@ export function PartitionPlayer({ partition }: PartitionPlayerProps) {
             size="icon-lg"
             className="min-h-12 min-w-12"
             onClick={stop}
+            disabled={isInstrumentLoading}
             aria-label="Arrêter"
           >
             <Stop className="size-4" weight="fill" />

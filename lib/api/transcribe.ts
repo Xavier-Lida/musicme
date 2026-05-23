@@ -1,13 +1,14 @@
 import samplePartition from "@/lib/mocks/sample-partition.json";
 import { TranscribeError } from "@/lib/api/errors";
 import { transcriptionResponseToPartition } from "@/lib/api/transcription-adapter";
+import { getAudioFilename } from "@/lib/audio/blob";
+import { validateAudioBlob } from "@/lib/audio/validate";
 import type { FastAPIValidationError, TranscriptionResponse } from "@/lib/types/api";
 import type { PartitionResponse } from "@/lib/types/partition";
 
 const MOCK_DELAY_MS = 1800;
 
-/** Matches backend settings.MAX_UPLOAD_BYTES (25 MB). */
-export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+export { MAX_UPLOAD_BYTES } from "@/lib/audio/validate";
 
 function shouldUseMockApi(): boolean {
   const flag = process.env.NEXT_PUBLIC_USE_MOCK;
@@ -26,25 +27,7 @@ export function normalizeApiUrl(baseUrl: string): string {
   return `https://${trimmed}`;
 }
 
-export function getAudioFilename(blob: Blob): string {
-  const type = blob.type.toLowerCase();
-  if (type.includes("mp4") || type.includes("m4a")) return "recording.m4a";
-  if (type.includes("mpeg") || type.includes("mp3")) return "recording.mp3";
-  if (type.includes("ogg")) return "recording.ogg";
-  if (type.includes("wav")) return "recording.wav";
-  return "recording.webm";
-}
-
-export function validateAudioBlob(audio: Blob): void {
-  if (audio.size === 0) {
-    throw new TranscribeError("L'enregistrement audio est vide.");
-  }
-  if (audio.size > MAX_UPLOAD_BYTES) {
-    throw new TranscribeError(
-      `Fichier trop volumineux (max ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} Mo).`,
-    );
-  }
-}
+export { validateAudioBlob } from "@/lib/audio/validate";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -73,12 +56,23 @@ function getTranscribeUrl(): string {
   return `${normalizeApiUrl(baseUrl)}/api/transcribe`;
 }
 
-async function transcribeWithBackend(audio: Blob): Promise<PartitionResponse> {
+export interface TranscribeAudioOptions {
+  filename?: string;
+}
+
+async function transcribeWithBackend(
+  audio: Blob,
+  options?: TranscribeAudioOptions,
+): Promise<PartitionResponse> {
   validateAudioBlob(audio);
 
   // POST multipart/form-data — field name must be exactly "audio" (no Content-Type header).
   const form = new FormData();
-  form.append("audio", audio, getAudioFilename(audio));
+  form.append(
+    "audio",
+    audio,
+    getAudioFilename(audio, options?.filename),
+  );
 
   let response: Response;
   try {
@@ -109,11 +103,12 @@ async function transcribeWithBackend(audio: Blob): Promise<PartitionResponse> {
 
 export async function transcribeAudio(
   audio: Blob,
+  options?: TranscribeAudioOptions,
 ): Promise<PartitionResponse> {
   if (shouldUseMockApi()) {
     return transcribeWithMock();
   }
-  return transcribeWithBackend(audio);
+  return transcribeWithBackend(audio, options);
 }
 
 export { TranscribeError } from "@/lib/api/errors";

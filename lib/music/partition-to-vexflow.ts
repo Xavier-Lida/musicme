@@ -1,4 +1,17 @@
-import { Renderer, Stave, StaveNote, Voice, Formatter } from "vexflow";
+import {
+  Beam,
+  Curve,
+  Formatter,
+  Renderer,
+  Stave,
+  StaveNote,
+  StaveTie,
+  Voice,
+} from "vexflow";
+import {
+  findSlurPairs,
+  findTieGroups,
+} from "@/lib/music/note-connections";
 import {
   getBeatsPerMeasure,
   type PartitionNote,
@@ -102,5 +115,33 @@ export function renderPartitionToElement(
     voice.addTickables(tickables);
     formatter.joinVoices([voice]).formatToStave([voice], stave);
     voice.draw(context, stave);
+
+    const beams = Beam.applyAndGetBeams(
+      voice,
+      undefined,
+      Beam.getDefaultBeamGroups(timeSig),
+    );
+    for (const beam of beams) {
+      beam.setContext(context).draw();
+    }
+
+    for (const group of findTieGroups(measureNotes)) {
+      new StaveTie({
+        firstNote: tickables[group.startIndex],
+        lastNote: tickables[group.endIndex],
+        firstIndexes: [0],
+        lastIndexes: [0],
+      })
+        .setContext(context)
+        .draw();
+    }
+
+    for (const pair of findSlurPairs(measureNotes)) {
+      new Curve(tickables[pair.fromIndex], tickables[pair.toIndex], {
+        openingDirection: "auto",
+      })
+        .setContext(context)
+        .draw();
+    }
   });
 }

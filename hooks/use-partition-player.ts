@@ -3,33 +3,39 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Tone from "tone";
 import {
+  disposePianoInstrument,
+  getPianoInstrument,
+  type PartitionInstrument,
+} from "@/lib/music/piano-instrument";
+import {
   clearScheduledEvents,
-  createPartitionSynth,
   getPlaybackDurationSeconds,
   schedulePartitionOnTransport,
 } from "@/lib/music/partition-to-tone";
 import type { PartitionResponse } from "@/lib/types/partition";
 
-function disposeTransport(
+function clearTransport(
   eventIds: number[],
-  synth: Tone.PolySynth | null,
+  instrument: PartitionInstrument | null,
 ): void {
   clearScheduledEvents(eventIds);
   Tone.Transport.stop();
   Tone.Transport.cancel();
   Tone.Transport.seconds = 0;
-  synth?.releaseAll();
-  synth?.dispose();
+  instrument?.releaseAll();
 }
 
 export function usePartitionPlayer(partition: PartitionResponse | null) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [isInstrumentLoading, setIsInstrumentLoading] = useState(true);
+  const [isInstrumentReady, setIsInstrumentReady] = useState(false);
 
-  const synthRef = useRef<Tone.PolySynth | null>(null);
+  const instrumentRef = useRef<PartitionInstrument | null>(null);
   const eventIdsRef = useRef<number[]>([]);
   const durationRef = useRef(0);
   const rafRef = useRef<number | null>(null);
+
   const stopProgressLoop = useCallback(() => {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
@@ -63,34 +69,52 @@ export function usePartitionPlayer(partition: PartitionResponse | null) {
   }, []);
 
   const setupTransport = useCallback(() => {
-    if (!partition) return;
+    if (!partition || !instrumentRef.current) return;
 
-    disposeTransport(eventIdsRef.current, synthRef.current);
+    clearTransport(eventIdsRef.current, instrumentRef.current);
     eventIdsRef.current = [];
-    synthRef.current = null;
 
     durationRef.current = getPlaybackDurationSeconds(partition);
-    synthRef.current = createPartitionSynth();
     eventIdsRef.current = schedulePartitionOnTransport(
       partition,
-      synthRef.current,
+      instrumentRef.current,
     );
   }, [partition]);
 
   useEffect(() => {
-    setupTransport();
+    let cancelled = false;
+
+    void getPianoInstrument().then((instrument) => {
+      if (cancelled) return;
+      instrumentRef.current = instrument;
+      setIsInstrumentReady(true);
+      setIsInstrumentLoading(false);
+    });
 
     return () => {
+      cancelled = true;
       stopProgressLoop();
-      disposeTransport(eventIdsRef.current, synthRef.current);
+      clearTransport(eventIdsRef.current, instrumentRef.current);
       eventIdsRef.current = [];
-      synthRef.current = null;
+      disposePianoInstrument();
+      instrumentRef.current = null;
     };
-  }, [partition, setupTransport, stopProgressLoop]);
+  }, [stopProgressLoop]);
+
+  useEffect(() => {
+    if (!isInstrumentReady) return;
+    setupTransport();
+  }, [isInstrumentReady, setupTransport]);
 
   const play = useCallback(async () => {
     if (!partition) return;
+
     await Tone.start();
+    const instrument = await getPianoInstrument();
+    instrumentRef.current = instrument;
+    setIsInstrumentReady(true);
+    setIsInstrumentLoading(false);
+
     setupTransport();
     Tone.Transport.seconds = 0;
     setProgress(0);
@@ -116,6 +140,8 @@ export function usePartitionPlayer(partition: PartitionResponse | null) {
     play,
     pause,
     stop,
+    isInstrumentLoading,
+    isInstrumentReady,
     durationSeconds: partition ? getPlaybackDurationSeconds(partition) : 0,
   };
 }
