@@ -31,6 +31,7 @@ interface Props {
   selectedIndex?: number | null;
   onNoteSelect?: (index: number) => void;
   onStaffClick?: (pitch: number, start: number) => void;
+  onSvgReady?: (svg: SVGSVGElement | null) => void;
 }
 
 // MIDI pitch → VexFlow key string (e.g. 60 -> "c/4", 61 -> "c#/4")
@@ -50,15 +51,18 @@ export default function SheetMusicRenderer({
   selectedIndex = null,
   onNoteSelect,
   onStaffClick,
+  onSvgReady,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const onNoteSelectRef = useRef(onNoteSelect);
   const onStaffClickRef = useRef(onStaffClick);
+  const onSvgReadyRef = useRef(onSvgReady);
   const timelineDurationRef = useRef(timelineDuration);
   const noteAreaRef = useRef({ left: 0, width: 0 });
 
   onNoteSelectRef.current = onNoteSelect;
   onStaffClickRef.current = onStaffClick;
+  onSvgReadyRef.current = onSvgReady;
   timelineDurationRef.current = timelineDuration;
 
   const staveWidth = width - 20;
@@ -72,7 +76,8 @@ export default function SheetMusicRenderer({
     const renderer = new Renderer(host, Renderer.Backends.SVG);
     renderer.resize(width, height);
     const ctx = renderer.getContext();
-    const svg = host.querySelector('svg');
+    const svg = host.querySelector('svg') as SVGSVGElement | null;
+    onSvgReadyRef.current?.(svg);
 
     const stave = new Stave(STAVE_LEFT, STAVE_Y, staveWidth);
     stave.addClef('treble').addTimeSignature('4/4');
@@ -187,6 +192,7 @@ export default function SheetMusicRenderer({
 
     return () => {
       for (const cleanup of cleanups) cleanup();
+      onSvgReadyRef.current?.(null);
     };
   }, [notes, width, height, selectedIndex, staveWidth, timelineDuration]);
 

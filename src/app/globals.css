@@ -190,18 +190,7 @@
   height: calc(100dvh - 56px - 64px);
 }
 
-/* ─── Left Panel ───────────────────────────────────────── */
-.daw-left {
-  width: 240px;
-  flex-shrink: 0;
-  background: var(--daw-panel);
-  border-right: 1px solid var(--daw-border);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
+/* ─── Project Info Panel (used inside the AppHeader popover) ── */
 .daw-panel-section {
   padding: 14px;
   border-bottom: 1px solid var(--daw-border);
@@ -600,55 +589,7 @@
 .daw-add-track-btn:hover { border-color: var(--daw-accent); color: var(--daw-accent); background: oklch(0.62 0.22 285 / 8%); }
 
 /* ─── Mobile ───────────────────────────────────────────── */
-.daw-mobile-bar {
-  display: none;
-  position: fixed;
-  top: 0; left: 0; right: 0;
-  z-index: 60;
-  height: 56px;
-  align-items: center;
-  padding: 0 16px;
-  gap: 12px;
-  background: oklch(0.10 0.01 260 / 95%);
-  border-bottom: 1px solid var(--daw-border);
-}
-
-.daw-drawer-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-  background: oklch(0 0 0 / 65%);
-  animation: fade-in 0.2s ease;
-}
-@keyframes fade-in { from{opacity:0} to{opacity:1} }
-
-.daw-drawer {
-  position: fixed;
-  top: 0; bottom: 0; left: 0;
-  width: min(240px, 88vw);
-  background: var(--daw-panel);
-  border-right: 1px solid var(--daw-border);
-  z-index: 71;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  transform: translateX(-100%);
-  transition: transform 0.25s cubic-bezier(0.4,0,0.2,1);
-}
-.daw-drawer.open { transform: translateX(0); }
-
-.daw-drawer-close {
-  display: flex;
-  justify-content: flex-end;
-  padding: 10px 12px 0;
-}
-
 @media (max-width: 768px) {
-  .daw-left { display: none; }
-  .daw-mobile-bar { display: flex; }
-  .daw-header { display: none; }
-  .daw-content { margin-top: 56px; }
   .daw-header-subtitle { display: none; }
   .daw-footer-status { display: none; }
   .daw-track-label { width: 60px; }

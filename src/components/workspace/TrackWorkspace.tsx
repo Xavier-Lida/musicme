@@ -47,6 +47,8 @@ interface TrackWorkspaceProps {
   onClearNotes: () => void;
   onClearSession: () => void;
   onOpenNoteEditor: () => void;
+  onExportPdf: () => void;
+  onSheetSvgReady?: (svg: SVGSVGElement | null) => void;
 }
 
 export function TrackWorkspace({
@@ -83,6 +85,8 @@ export function TrackWorkspace({
   onClearNotes,
   onClearSession,
   onOpenNoteEditor,
+  onExportPdf,
+  onSheetSvgReady,
 }: TrackWorkspaceProps) {
   const sheetContainerRef = useRef<HTMLDivElement>(null);
   const [sheetWidth, setSheetWidth] = useState(800);
@@ -115,6 +119,7 @@ export function TrackWorkspace({
               selectedIndex={selectedIndex}
               onNoteSelect={onNoteSelect}
               onStaffClick={hasResult ? onStaffClick : undefined}
+              onSvgReady={onSheetSvgReady}
             />
           </div>
         </div>
@@ -135,6 +140,7 @@ export function TrackWorkspace({
           onUploadAudio={onUploadAudio}
           onInstrumentChange={onInstrumentChange}
           onClearNotes={onClearNotes}
+          onExportPdf={onExportPdf}
         />
 
         <AudioTimeline

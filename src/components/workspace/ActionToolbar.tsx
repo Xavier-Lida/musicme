@@ -1,12 +1,24 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import {
   FileArrowUpIcon,
+  FilePdfIcon,
   MicrophoneIcon,
   StopIcon,
   TrashIcon,
 } from '@phosphor-icons/react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -39,6 +51,7 @@ interface ActionToolbarProps {
   onUploadAudio: (file: File) => void;
   onInstrumentChange: (id: PlaybackInstrumentId) => void;
   onClearNotes: () => void;
+  onExportPdf: () => void;
 }
 
 export function ActionToolbar({
@@ -55,8 +68,10 @@ export function ActionToolbar({
   onUploadAudio,
   onInstrumentChange,
   onClearNotes,
+  onExportPdf,
 }: ActionToolbarProps) {
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
 
   function handleAudioFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -65,15 +80,10 @@ export function ActionToolbar({
   }
 
   const actionsDisabled = busy || playing || isRecording;
+  const clearDisabled = !hasNotes || !hasResult || actionsDisabled;
 
-  function handleClearTrackClick() {
-    if (
-      !window.confirm(
-        'Supprimer toutes les notes de la piste ? L\u2019audio sera conserv\u00e9.',
-      )
-    ) {
-      return;
-    }
+  function handleConfirmClear() {
+    setClearDialogOpen(false);
     onClearNotes();
   }
 
@@ -148,13 +158,45 @@ export function ActionToolbar({
         <Button
           size="sm"
           variant="outline"
-          disabled={!hasNotes || !hasResult || actionsDisabled}
-          onClick={handleClearTrackClick}
+          disabled={clearDisabled || !hasNotes}
+          onClick={onExportPdf}
           className="h-8 gap-1.5 border-border bg-secondary hover:bg-secondary/80 text-foreground"
         >
-          <TrashIcon className="size-4" />
-          Clear track
+          <FilePdfIcon className="size-4" />
+          Exporter PDF
         </Button>
+
+        <AlertDialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
+          <AlertDialogTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={clearDisabled}
+              className="h-8 gap-1.5 border-border bg-secondary hover:bg-secondary/80 text-foreground"
+            >
+              <TrashIcon className="size-4" />
+              Clear track
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Effacer la piste ?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Toutes les notes de la partition seront supprimées. Cette action
+                est irréversible.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Annuler</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={handleConfirmClear}
+              >
+                Effacer
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

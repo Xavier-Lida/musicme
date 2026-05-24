@@ -1,10 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/layout/AppShell';
-import { ProjectInfoPanel } from '@/components/project/ProjectInfoPanel';
 import { TrackWorkspace } from '@/components/workspace/TrackWorkspace';
 import NoteEditor from '@/components/NoteEditor';
 import {
@@ -31,6 +29,7 @@ import {
   sortNotesByStart,
 } from '@/lib/music/note-editing';
 import type { PlaybackInstrumentId } from '@/lib/music/partition-instruments';
+import { exportPartitionToPdf } from '@/lib/pdf-export';
 import { sessionCache } from '@/lib/sessionCache';
 import type {
   CleanupOptions,
@@ -65,6 +64,26 @@ export default function Page() {
   const [sessionRestored, setSessionRestored] = useState(false);
   const [noteEditorOpen, setNoteEditorOpen] = useState(false);
   const originalNotesRef = useRef<Note[] | null>(null);
+  const sheetSvgRef = useRef<SVGSVGElement | null>(null);
+
+  const handleSheetSvgReady = useCallback((svg: SVGSVGElement | null) => {
+    sheetSvgRef.current = svg;
+  }, []);
+
+  const handleExportPdf = useCallback(async () => {
+    const svg = sheetSvgRef.current;
+    if (!svg || !result || result.notes.length === 0) {
+      toast.error('Aucune partition à exporter');
+      return;
+    }
+    try {
+      await exportPartitionToPdf({ svgElement: svg, metadata });
+      toast.success('Partition exportée en PDF');
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error("Échec de l'export PDF", { description: message });
+    }
+  }, [metadata, result]);
 
   const notes = result?.notes ?? EMPTY_NOTES;
   const activePreset = cleanupOptions.preset ?? 'standard';
@@ -370,9 +389,8 @@ export default function Page() {
 
   return (
     <AppShell
-      infoPanel={
-        <ProjectInfoPanel metadata={metadata} onFieldChange={updateField} />
-      }
+      metadata={metadata}
+      onFieldChange={updateField}
       transport={{
         isPlaying: playback.isPlaying,
         disabled: transportDisabled,
@@ -433,6 +451,8 @@ export default function Page() {
         onClearNotes={handleClearNotes}
         onClearSession={handleClearSession}
         onOpenNoteEditor={() => setNoteEditorOpen(true)}
+        onExportPdf={handleExportPdf}
+        onSheetSvgReady={handleSheetSvgReady}
       />
 
       <Sheet open={noteEditorOpen} onOpenChange={setNoteEditorOpen}>
