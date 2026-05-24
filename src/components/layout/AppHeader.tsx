@@ -1,6 +1,7 @@
 'use client';
 
-import { GearIcon, InfoIcon, FilePdfIcon } from '@phosphor-icons/react';
+import { useState, useRef, useEffect } from 'react';
+import { FilePdfIcon, PencilSimpleIcon } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import {
   Popover,
@@ -38,6 +39,22 @@ export function AppHeader({
   onExportPdf,
   exportPdfDisabled,
 }: AppHeaderProps) {
+  const [editingTitle, setEditingTitle] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingTitle) {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    }
+  }, [editingTitle]);
+
+  const displayName = metadata.name?.trim() || 'Nouvelle partition';
+  const subtitleParts: string[] = [];
+  if (metadata.author?.trim()) subtitleParts.push(`par ${metadata.author.trim()}`);
+  if (metadata.instruments?.length) subtitleParts.push(metadata.instruments.join(', '));
+  const subtitle = subtitleParts.join(' · ');
+
   return (
     <header className={cn('daw-header', className)}>
       {showMobileMenu && (
@@ -52,68 +69,84 @@ export function AppHeader({
       )}
 
       <div className="daw-logo" aria-hidden="true">M</div>
-      <span className="daw-header-title">MusicMe</span>
-      <p className="daw-header-subtitle">
-        Fredonnez ou importez un audio — obtenez une partition à 120 BPM
-      </p>
+
+      {/* Partition info — title is editable inline, subtitle gives author + instruments */}
+      <div className="flex-1 min-w-0 flex flex-col justify-center leading-tight">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/70 shrink-0">
+            Partition
+          </span>
+          {editingTitle ? (
+            <input
+              ref={titleInputRef}
+              type="text"
+              value={metadata.name}
+              placeholder="Nouvelle partition"
+              onChange={(e) => onFieldChange('name', e.target.value)}
+              onBlur={() => setEditingTitle(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === 'Escape') setEditingTitle(false);
+              }}
+              className="daw-title-input"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditingTitle(true)}
+              className="daw-title-button truncate"
+              title="Cliquer pour renommer la partition"
+            >
+              {displayName}
+            </button>
+          )}
+          <Popover>
+            <Tooltip>
+              <PopoverTrigger asChild>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Modifier les infos de la partition"
+                    className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    <PencilSimpleIcon className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+              </PopoverTrigger>
+              <TooltipContent>Modifier titre, auteur, instruments</TooltipContent>
+            </Tooltip>
+            <PopoverContent align="start" className="w-72 p-0">
+              <ProjectInfoPanel metadata={metadata} onFieldChange={onFieldChange} />
+            </PopoverContent>
+          </Popover>
+        </div>
+        {subtitle && (
+          <span className="text-[11px] text-muted-foreground truncate">
+            {subtitle}
+          </span>
+        )}
+      </div>
 
       {onExportPdf && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              variant="ghost"
+              variant="default"
               size="sm"
               aria-label="Exporter la partition en PDF"
               onClick={onExportPdf}
               disabled={exportPdfDisabled}
-              className="ml-auto shrink-0 gap-1.5 text-muted-foreground hover:text-foreground"
+              className="ml-auto shrink-0 gap-1.5 h-8"
             >
               <FilePdfIcon className="size-4" />
               <span className="hidden sm:inline">Exporter PDF</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            Exporter la partition (avec les infos du projet)
+            Génère un PDF avec le titre, l&apos;auteur et la partition
           </TooltipContent>
         </Tooltip>
       )}
-
-      <Popover>
-        <Tooltip>
-          <PopoverTrigger asChild>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Informations de la partition"
-                className={cn('shrink-0 text-muted-foreground', !onExportPdf && 'ml-auto')}
-              >
-                <InfoIcon />
-              </Button>
-            </TooltipTrigger>
-          </PopoverTrigger>
-          <TooltipContent>
-            Informations de la partition (titre, auteur, instruments)
-          </TooltipContent>
-        </Tooltip>
-        <PopoverContent align="end" className="w-72 p-0">
-          <ProjectInfoPanel metadata={metadata} onFieldChange={onFieldChange} />
-        </PopoverContent>
-      </Popover>
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Réglages"
-            className="shrink-0 text-muted-foreground"
-          >
-            <GearIcon />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Réglages (bientôt)</TooltipContent>
-      </Tooltip>
     </header>
   );
 }

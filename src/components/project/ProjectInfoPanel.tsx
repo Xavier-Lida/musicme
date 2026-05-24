@@ -14,13 +14,9 @@ interface ProjectInfoPanelProps {
 
 const INSTRUMENT_OPTIONS = [
   'Piano',
-  'Guitare acoustique',
-  'Guitare électrique',
+  'Guitare',
   'Basse',
-  'Violon',
-  'Batterie',
-  'Synthétiseur',
-  'Autre',
+  'Flûte',
 ];
 
 export function ProjectInfoPanel({

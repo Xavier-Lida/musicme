@@ -143,6 +143,37 @@
   border-left: 1px solid var(--daw-border);
 }
 
+/* Inline-editable partition title in the header */
+.daw-title-button,
+.daw-title-input {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: oklch(0.95 0.01 260);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-family: inherit;
+  min-width: 0;
+  max-width: 100%;
+  outline: none;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+  text-align: left;
+}
+.daw-title-button:hover {
+  background: oklch(1 0 0 / 5%);
+  border-color: var(--daw-border);
+}
+.daw-title-input {
+  cursor: text;
+  background: var(--daw-surface);
+  border-color: var(--daw-accent);
+  box-shadow: 0 0 0 2px oklch(0.62 0.22 285 / 20%);
+  min-width: 200px;
+}
+
 /* ─── DAW Footer / Transport ───────────────────────────── */
 .daw-footer {
   position: fixed;
