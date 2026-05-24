@@ -1,6 +1,17 @@
 'use client';
 
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import type { Note } from '@/types/transcription';
 import { SIXTEENTH_SECONDS } from '@/types/transcription';
 import { midiToPitch } from '@/lib/music/pitch';
@@ -10,6 +21,7 @@ import {
   secondsToSixteenthSlot,
   sixteenthSlotToSeconds,
 } from '@/lib/music/note-editing';
+import { cn } from '@/lib/utils';
 
 interface Props {
   notes: Note[];
@@ -40,53 +52,59 @@ export default function NoteEditor({
 
   function formatDuration(note: Note): string {
     const sixteenths = Math.round((note.end - note.start) / SIXTEENTH_SECONDS);
-    if (sixteenths >= 4) return 'quarter';
-    if (sixteenths >= 2) return '8th';
-    return '16th';
+    if (sixteenths >= 4) return 'noire';
+    if (sixteenths >= 2) return 'croche';
+    return 'double-croche';
   }
 
   return (
-    <section className="note-editor" aria-label="Note editor">
-      <div className="note-editor-header">
-        <h2>Notes ({notes.length})</h2>
-        <p className="status">Click a note in the list or on the sheet to select it.</p>
+    <section className="mt-4 flex flex-col gap-4" aria-label="Éditeur de notes">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-sm font-medium">Notes ({notes.length})</h2>
+        <p className="text-xs text-muted-foreground">
+          Cliquez sur une note dans la liste ou sur la partition pour la sélectionner.
+        </p>
       </div>
 
       {notes.length > 0 ? (
-        <div className="note-list-wrap">
-          <table className="note-list">
+        <div className="overflow-x-auto rounded-none border border-border">
+          <table className="w-full border-collapse text-xs">
             <thead>
-              <tr>
-                <th>#</th>
-                <th>Pitch</th>
-                <th>Start</th>
-                <th>Duration</th>
-                <th aria-label="Actions" />
+              <tr className="border-b border-border bg-muted/40">
+                <th className="px-3 py-2 text-left font-medium text-muted-foreground">#</th>
+                <th className="px-3 py-2 text-left font-medium text-muted-foreground">Hauteur</th>
+                <th className="px-3 py-2 text-left font-medium text-muted-foreground">Début</th>
+                <th className="px-3 py-2 text-left font-medium text-muted-foreground">Durée</th>
+                <th className="px-3 py-2" aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
               {notes.map((note, index) => (
                 <tr
                   key={`${index}-${note.start}-${note.pitch}`}
-                  className={selectedIndex === index ? 'selected' : undefined}
+                  className={cn(
+                    'cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/30',
+                    selectedIndex === index && 'bg-primary/15',
+                  )}
                   onClick={() => onSelect(index)}
                 >
-                  <td>{index + 1}</td>
-                  <td>{midiToPitch(note.pitch)}</td>
-                  <td>{secondsToSixteenthSlot(note.start)}</td>
-                  <td>{formatDuration(note)}</td>
-                  <td>
-                    <button
+                  <td className="px-3 py-2">{index + 1}</td>
+                  <td className="px-3 py-2">{midiToPitch(note.pitch)}</td>
+                  <td className="px-3 py-2">{secondsToSixteenthSlot(note.start)}</td>
+                  <td className="px-3 py-2">{formatDuration(note)}</td>
+                  <td className="px-3 py-2">
+                    <Button
                       type="button"
-                      className="note-remove"
+                      variant="destructive"
+                      size="xs"
                       onClick={(e) => {
                         e.stopPropagation();
                         onRemove(index);
                       }}
-                      aria-label={`Remove note ${midiToPitch(note.pitch)}`}
+                      aria-label={`Supprimer la note ${midiToPitch(note.pitch)}`}
                     >
-                      Remove
-                    </button>
+                      Supprimer
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -94,46 +112,66 @@ export default function NoteEditor({
           </table>
         </div>
       ) : (
-        <p className="status">No notes — add one below or click the staff.</p>
+        <p className="text-xs text-muted-foreground">
+          Aucune note — ajoutez-en une ci-dessous ou cliquez sur la portée.
+        </p>
       )}
 
-      <form className="note-add-form" onSubmit={handleSubmit}>
-        <h3>Add note</h3>
-        <div className="note-add-fields">
-          <label>
-            Pitch
-            <select value={pitch} onChange={(e) => setPitch(Number(e.target.value))}>
-              {PITCH_OPTIONS.map((p) => (
-                <option key={p} value={p}>
-                  {midiToPitch(p)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Start (16th slot)
-            <input
+      <form className="flex flex-col gap-3 border-t border-border pt-4" onSubmit={handleSubmit}>
+        <h3 className="text-sm font-medium">Ajouter une note</h3>
+        <FieldGroup className="gap-3">
+          <Field>
+            <FieldLabel htmlFor="note-pitch">Hauteur</FieldLabel>
+            <Select value={String(pitch)} onValueChange={(v) => setPitch(Number(v))}>
+              <SelectTrigger id="note-pitch">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {PITCH_OPTIONS.map((p) => (
+                    <SelectItem key={p} value={String(p)}>
+                      {midiToPitch(p)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="note-start">Début (case 16e)</FieldLabel>
+            <Input
+              id="note-start"
               type="number"
               min={0}
               value={startSlot}
               onChange={(e) => setStartSlot(Math.max(0, Number(e.target.value)))}
             />
-          </label>
-          <label>
-            Duration
-            <select
-              value={durationSeconds}
-              onChange={(e) => setDurationSeconds(Number(e.target.value))}
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="note-duration">Durée</FieldLabel>
+            <Select
+              value={String(durationSeconds)}
+              onValueChange={(v) => setDurationSeconds(Number(v))}
             >
-              {DURATION_OPTIONS.map((d) => (
-                <option key={d.label} value={d.seconds}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="submit">Add</button>
-        </div>
+              <SelectTrigger id="note-duration">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {DURATION_OPTIONS.map((d) => (
+                    <SelectItem key={d.label} value={String(d.seconds)}>
+                      {d.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Button type="submit">Ajouter</Button>
+        </FieldGroup>
       </form>
     </section>
   );

@@ -2,25 +2,35 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { toast } from 'sonner';
+import { AppShell } from '@/components/layout/AppShell';
+import { ProjectInfoPanel } from '@/components/project/ProjectInfoPanel';
+import { TrackWorkspace } from '@/components/workspace/TrackWorkspace';
 import NoteEditor from '@/components/NoteEditor';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
+import { useMelodyPlayback } from '@/hooks/useMelodyPlayback';
+import { useProjectMetadata } from '@/hooks/useProjectMetadata';
 import {
   DEFAULT_CLEANUP_OPTIONS,
   exportMidi,
   recleanupNotes,
   transcribeAudio,
 } from '@/lib/api';
-import { blobToWav, playMelody } from '@/lib/audio';
+import { blobToWav, decodeAudioDuration, extractWaveformPeaks } from '@/lib/audio';
 import {
   addNote,
   getNextAppendStart,
   removeNoteAt,
   sortNotesByStart,
 } from '@/lib/music/note-editing';
-import {
-  getInstrumentLabel,
-  type PlaybackInstrumentId,
-} from '@/lib/music/partition-instruments';
+import type { PlaybackInstrumentId } from '@/lib/music/partition-instruments';
 import { sessionCache } from '@/lib/sessionCache';
 import type {
   CleanupOptions,
@@ -28,20 +38,9 @@ import type {
   Note,
   TranscriptionResult,
 } from '@/types/transcription';
-import { FIXED_BPM, GRID_SUBDIVISION, SIXTEENTH_SECONDS } from '@/types/transcription';
+import { GRID_SUBDIVISION, SIXTEENTH_SECONDS, FIXED_BPM } from '@/types/transcription';
 
-const INSTRUMENT_OPTIONS: readonly PlaybackInstrumentId[] = [
-  'piano',
-  'guitar-acoustic',
-];
-
-const PRESET_OPTIONS: readonly { id: CleanupPreset; label: string }[] = [
-  { id: 'beginner', label: 'Beginner' },
-  { id: 'standard', label: 'Standard' },
-  { id: 'expert', label: 'Expert' },
-];
-
-const SheetMusicRenderer = dynamic(() => import('@/components/SheetMusicRenderer'), { ssr: false });
+const EMPTY_NOTES: Note[] = [];
 
 function applyTranscriptionNotes(
   transcription: TranscriptionResult,
@@ -52,30 +51,42 @@ function applyTranscriptionNotes(
 
 export default function Page() {
   const { start, stop, status, error, isRecording } = useAudioRecorder({ click: true });
+  const { metadata, updateField } = useProjectMetadata();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<TranscriptionResult | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(false);
   const [lastWav, setLastWav] = useState<Blob | null>(null);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [waveformPeaks, setWaveformPeaks] = useState<number[]>([]);
   const [instrument, setInstrument] = useState<PlaybackInstrumentId>('piano');
   const [selectedNoteIndex, setSelectedNoteIndex] = useState<number | null>(null);
   const [cleanupOptions, setCleanupOptions] = useState<CleanupOptions>(DEFAULT_CLEANUP_OPTIONS);
   const [recleanupAvailable, setRecleanupAvailable] = useState(false);
   const [sessionRestored, setSessionRestored] = useState(false);
+  const [noteEditorOpen, setNoteEditorOpen] = useState(false);
   const originalNotesRef = useRef<Note[] | null>(null);
 
+  const notes = result?.notes ?? EMPTY_NOTES;
   const activePreset = cleanupOptions.preset ?? 'standard';
 
-  const updateNotes = useCallback((notes: Note[], selected: number | null) => {
-    setResult((prev) => (prev ? { ...prev, notes } : prev));
+  const playback = useMelodyPlayback({
+    notes,
+    instrument,
+    audioDuration,
+  });
+  const stopPlaybackRef = useRef(playback.stop);
+  stopPlaybackRef.current = playback.stop;
+
+  const updateNotes = useCallback((nextNotes: Note[], selected: number | null) => {
+    setResult((prev) => (prev ? { ...prev, notes: nextNotes } : prev));
     setSelectedNoteIndex(selected);
   }, []);
 
   const handleRemoveNote = useCallback(
     (index: number) => {
       if (!result) return;
-      const { notes, selectedIndex } = removeNoteAt(result.notes, index);
-      updateNotes(notes, selectedIndex);
+      const { notes: updated, selectedIndex } = removeNoteAt(result.notes, index);
+      updateNotes(updated, selectedIndex);
     },
     [result, updateNotes],
   );
@@ -83,8 +94,12 @@ export default function Page() {
   const handleAddNote = useCallback(
     (pitch: number, start: number, duration: number) => {
       if (!result) return;
-      const { notes, selectedIndex } = addNote(result.notes, { pitch, start, duration });
-      updateNotes(notes, selectedIndex);
+      const { notes: updated, selectedIndex } = addNote(result.notes, {
+        pitch,
+        start,
+        duration,
+      });
+      updateNotes(updated, selectedIndex);
     },
     [result, updateNotes],
   );
@@ -93,12 +108,12 @@ export default function Page() {
     (pitch: number) => {
       if (!result) return;
       const startTime = getNextAppendStart(result.notes);
-      const { notes, selectedIndex } = addNote(result.notes, {
+      const { notes: updated, selectedIndex } = addNote(result.notes, {
         pitch,
         start: startTime,
         duration: SIXTEENTH_SECONDS,
       });
-      updateNotes(notes, selectedIndex);
+      updateNotes(updated, selectedIndex);
     },
     [result, updateNotes],
   );
@@ -107,6 +122,58 @@ export default function Page() {
     if (!result || !originalNotesRef.current) return;
     updateNotes([...originalNotesRef.current], null);
   }, [result, updateNotes]);
+
+  const updateAudioAssets = useCallback(async (wav: Blob) => {
+    setLastWav(wav);
+    try {
+      const [duration, peaks] = await Promise.all([
+        decodeAudioDuration(wav),
+        extractWaveformPeaks(wav),
+      ]);
+      setAudioDuration(duration);
+      setWaveformPeaks(peaks);
+    } catch {
+      setAudioDuration(0);
+      setWaveformPeaks([]);
+    }
+  }, []);
+
+  const processTranscription = useCallback(
+    async (wav: Blob) => {
+      setBusy(true);
+      setApiError(null);
+      stopPlaybackRef.current();
+
+      try {
+        await updateAudioAssets(wav);
+        const transcription = await transcribeAudio(wav, cleanupOptions);
+        const sortedNotes = sortNotesByStart(transcription.notes);
+        const rawNotes = transcription.raw_notes;
+        const hasRawNotes = rawNotes !== undefined;
+        const effectiveRaw = rawNotes ?? transcription.notes;
+
+        originalNotesRef.current = sortedNotes;
+        setResult(applyTranscriptionNotes(transcription, sortedNotes));
+        setRecleanupAvailable(hasRawNotes);
+        setSelectedNoteIndex(null);
+
+        await sessionCache.save({
+          audio: wav,
+          rawNotes: effectiveRaw,
+          cleanedNotes: sortedNotes,
+          options: cleanupOptions,
+          createdAt: Date.now(),
+        });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        setApiError(message);
+        toast.error('Erreur de transcription', { description: message });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [cleanupOptions, updateAudioAssets],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -119,7 +186,7 @@ export default function Page() {
           return;
         }
 
-        setLastWav(cached.audio);
+        await updateAudioAssets(cached.audio);
         setCleanupOptions(cached.options);
         const sorted = sortNotesByStart(cached.cleanedNotes);
         originalNotesRef.current = sorted;
@@ -133,7 +200,8 @@ export default function Page() {
         setRecleanupAvailable(cached.rawNotes.length > 0);
       } catch (e) {
         if (!cancelled) {
-          setApiError(e instanceof Error ? e.message : String(e));
+          const message = e instanceof Error ? e.message : String(e);
+          setApiError(message);
         }
       } finally {
         if (!cancelled) setSessionRestored(true);
@@ -144,7 +212,7 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [updateAudioAssets]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -159,37 +227,22 @@ export default function Page() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedNoteIndex, result, handleRemoveNote]);
 
-  async function handleStop() {
+  useEffect(() => {
+    if (error) {
+      toast.error('Erreur micro', { description: error });
+    }
+  }, [error]);
+
+  async function handleStopRecording() {
     const blob = await stop();
     if (!blob) return;
-    setBusy(true);
-    setApiError(null);
-    try {
-      const wav = await blobToWav(blob);
-      setLastWav(wav);
-      const transcription = await transcribeAudio(wav, cleanupOptions);
-      const sortedNotes = sortNotesByStart(transcription.notes);
-      const rawNotes = transcription.raw_notes;
-      const hasRawNotes = rawNotes !== undefined;
-      const effectiveRaw = rawNotes ?? transcription.notes;
+    const wav = await blobToWav(blob);
+    await processTranscription(wav);
+  }
 
-      originalNotesRef.current = sortedNotes;
-      setResult(applyTranscriptionNotes(transcription, sortedNotes));
-      setRecleanupAvailable(hasRawNotes);
-      setSelectedNoteIndex(null);
-
-      await sessionCache.save({
-        audio: wav,
-        rawNotes: effectiveRaw,
-        cleanedNotes: sortedNotes,
-        options: cleanupOptions,
-        createdAt: Date.now(),
-      });
-    } catch (e) {
-      setApiError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
+  async function handleUploadAudio(file: File) {
+    const wav = file.type.includes('wav') ? file : await blobToWav(file);
+    await processTranscription(wav);
   }
 
   const handlePresetChange = useCallback(
@@ -204,8 +257,8 @@ export default function Page() {
       const nextOptions: CleanupOptions = { ...cleanupOptions, preset };
 
       try {
-        const { notes } = await recleanupNotes(cached.rawNotes, nextOptions);
-        const sortedNotes = sortNotesByStart(notes);
+        const { notes: cleaned } = await recleanupNotes(cached.rawNotes, nextOptions);
+        const sortedNotes = sortNotesByStart(cleaned);
         originalNotesRef.current = sortedNotes;
         setCleanupOptions(nextOptions);
         setResult((prev) =>
@@ -219,7 +272,9 @@ export default function Page() {
           options: nextOptions,
         });
       } catch (e) {
-        setApiError(e instanceof Error ? e.message : String(e));
+        const message = e instanceof Error ? e.message : String(e);
+        setApiError(message);
+        toast.error('Erreur de nettoyage', { description: message });
       } finally {
         setBusy(false);
       }
@@ -228,8 +283,11 @@ export default function Page() {
   );
 
   async function handleClearSession() {
+    playback.stop();
     await sessionCache.clear();
     setLastWav(null);
+    setAudioDuration(0);
+    setWaveformPeaks([]);
     setResult(null);
     setCleanupOptions(DEFAULT_CLEANUP_OPTIONS);
     setRecleanupAvailable(false);
@@ -254,19 +312,9 @@ export default function Page() {
     const url = URL.createObjectURL(lastWav);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `hum-${Date.now()}.wav`;
+    a.download = `enregistrement-${Date.now()}.wav`;
     a.click();
     URL.revokeObjectURL(url);
-  }
-
-  async function handlePlay() {
-    if (!result || result.notes.length === 0) return;
-    setPlaying(true);
-    try {
-      await playMelody(result.notes, instrument);
-    } finally {
-      setPlaying(false);
-    }
   }
 
   const notesEdited =
@@ -274,130 +322,87 @@ export default function Page() {
     originalNotesRef.current &&
     JSON.stringify(result.notes) !== JSON.stringify(originalNotesRef.current);
 
-  const presetPickerDisabled = !recleanupAvailable || busy || isRecording || playing;
+  const presetPickerDisabled = !recleanupAvailable || busy || isRecording || playback.isPlaying;
+  const transportDisabled = busy || isRecording || notes.length === 0;
 
   return (
-    <main>
-      <h1>musicMe</h1>
-      <p className="subtitle">Hum into the mic — locked at 120 BPM, quantized to 16th notes.</p>
-
-      <div className="controls">
-        {!isRecording ? (
-          <button onClick={start} disabled={busy || status === 'requesting'}>
-            {status === 'requesting' ? 'Requesting mic…' : 'Record'}
-          </button>
-        ) : (
-          <button onClick={handleStop} className="secondary">
-            Stop
-          </button>
-        )}
-        <button
-          onClick={handlePlay}
-          disabled={!result || result.notes.length === 0 || playing}
-          className="secondary"
-        >
-          {playing ? 'Playing…' : `Play (${getInstrumentLabel(instrument)})`}
-        </button>
-        <div
-          className="instrument-picker"
-          role="radiogroup"
-          aria-label="Instrument"
-        >
-          {INSTRUMENT_OPTIONS.map((id) => (
-            <button
-              key={id}
-              type="button"
-              role="radio"
-              aria-checked={instrument === id}
-              className={`segment ${instrument === id ? 'active' : ''}`}
-              onClick={() => setInstrument(id)}
-              disabled={playing}
-            >
-              {getInstrumentLabel(id)}
-            </button>
-          ))}
-        </div>
-        <div
-          className="instrument-picker preset-picker"
-          role="radiogroup"
-          aria-label="Cleanup preset"
-          title={
-            recleanupAvailable
-              ? 'Re-clean notes without re-transcribing'
-              : 'Presets require an updated API (raw_notes + /api/recleanup)'
-          }
-        >
-          {PRESET_OPTIONS.map(({ id, label }) => (
-            <button
-              key={id}
-              type="button"
-              role="radio"
-              aria-checked={activePreset === id}
-              className={`segment ${activePreset === id ? 'active' : ''}`}
-              onClick={() => handlePresetChange(id)}
-              disabled={presetPickerDisabled}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={() => selectedNoteIndex !== null && handleRemoveNote(selectedNoteIndex)}
-          disabled={selectedNoteIndex === null || playing}
-          className="secondary"
-        >
-          Delete selected
-        </button>
-        <button
-          onClick={handleResetNotes}
-          disabled={!notesEdited || playing}
-          className="secondary"
-        >
-          Reset notes
-        </button>
-        <button onClick={handleDownloadMidi} disabled={!result || result.notes.length === 0} className="secondary">
-          Download MIDI
-        </button>
-        <button onClick={handleDownloadRecording} disabled={!lastWav} className="secondary">
-          Download recording (.wav)
-        </button>
-        <button
-          onClick={handleClearSession}
-          disabled={!result && !lastWav}
-          className="secondary"
-        >
-          Clear session
-        </button>
-        <span className="status">
-          {busy ? 'Transcribing…' : isRecording ? 'Recording with click track…' : 'Idle'}
-        </span>
-      </div>
-
+    <AppShell
+      infoPanel={
+        <ProjectInfoPanel metadata={metadata} onFieldChange={updateField} />
+      }
+      transport={{
+        isPlaying: playback.isPlaying,
+        disabled: transportDisabled,
+        onTogglePlayPause: () => playback.togglePlayPause(),
+        onSkipBack: () => playback.skipBack(),
+        onSkipForward: () => playback.skipForward(),
+      }}
+    >
       {sessionRestored && !recleanupAvailable && result && (
-        <p className="status hint">Presets require an updated API (raw_notes + /api/recleanup).</p>
+        <Alert>
+          <AlertDescription>
+            Les presets nécessitent une API à jour (raw_notes + /api/recleanup).
+          </AlertDescription>
+        </Alert>
       )}
 
-      {error && <p className="error">Mic error: {error}</p>}
-      {apiError && <p className="error">{apiError}</p>}
-
-      <div className="sheet-frame">
-        <SheetMusicRenderer
-          notes={result?.notes ?? []}
-          selectedIndex={selectedNoteIndex}
-          onNoteSelect={setSelectedNoteIndex}
-          onStaffClick={result ? handleStaffClick : undefined}
-        />
-      </div>
-
-      {result && (
-        <NoteEditor
-          notes={result.notes}
-          selectedIndex={selectedNoteIndex}
-          onSelect={setSelectedNoteIndex}
-          onRemove={handleRemoveNote}
-          onAdd={handleAddNote}
-        />
+      {apiError && (
+        <Alert variant="destructive">
+          <AlertDescription>{apiError}</AlertDescription>
+        </Alert>
       )}
-    </main>
+
+      <TrackWorkspace
+        notes={notes}
+        peaks={waveformPeaks}
+        duration={playback.duration}
+        currentTime={playback.currentTime}
+        selectedIndex={selectedNoteIndex}
+        isRecording={isRecording}
+        isRequestingMic={status === 'requesting'}
+        busy={busy}
+        playing={playback.isPlaying}
+        instrument={instrument}
+        activePreset={activePreset}
+        presetPickerDisabled={presetPickerDisabled}
+        recleanupAvailable={recleanupAvailable}
+        hasResult={!!result}
+        hasRecording={!!lastWav}
+        notesEdited={!!notesEdited}
+        onNoteSelect={setSelectedNoteIndex}
+        onStaffClick={handleStaffClick}
+        onSeek={playback.seek}
+        onStartRecording={start}
+        onStopRecording={handleStopRecording}
+        onUploadAudio={handleUploadAudio}
+        onInstrumentChange={setInstrument}
+        onPresetChange={handlePresetChange}
+        onDeleteSelected={() =>
+          selectedNoteIndex !== null && handleRemoveNote(selectedNoteIndex)
+        }
+        onResetNotes={handleResetNotes}
+        onDownloadMidi={handleDownloadMidi}
+        onDownloadRecording={handleDownloadRecording}
+        onClearSession={handleClearSession}
+        onOpenNoteEditor={() => setNoteEditorOpen(true)}
+      />
+
+      <Sheet open={noteEditorOpen} onOpenChange={setNoteEditorOpen}>
+        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
+          <SheetHeader>
+            <SheetTitle>Éditeur de notes</SheetTitle>
+          </SheetHeader>
+          {result && (
+            <NoteEditor
+              notes={result.notes}
+              selectedIndex={selectedNoteIndex}
+              onSelect={setSelectedNoteIndex}
+              onRemove={handleRemoveNote}
+              onAdd={handleAddNote}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
+    </AppShell>
   );
 }
