@@ -16,6 +16,11 @@ export async function POST(request: NextRequest) {
   const upstream = new FormData();
   upstream.append('file', file, file instanceof File ? file.name : 'recording.wav');
 
+  const options = form.get('options');
+  if (typeof options === 'string') {
+    upstream.append('options', options);
+  }
+
   const res = await fetch(`${API_URL}/api/transcribe`, {
     method: 'POST',
     body: upstream,

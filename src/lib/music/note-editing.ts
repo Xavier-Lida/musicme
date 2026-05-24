@@ -38,6 +38,7 @@ export function addNote(
     start,
     end: start + Math.max(duration, SIXTEENTH_SECONDS),
     velocity: params.velocity ?? 80,
+    tied_to_next: false,
   };
   const sorted = sortNotesByStart([...notes, newNote]);
   const selectedIndex = sorted.indexOf(newNote);

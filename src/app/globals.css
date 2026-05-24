@@ -116,6 +116,10 @@ button.secondary {
   font-size: 14px;
 }
 
+.status.hint {
+  margin: -12px 0 16px;
+}
+
 .error {
   color: #ff6b6b;
   margin-top: 12px;

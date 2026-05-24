@@ -5,6 +5,7 @@ import {
   Renderer,
   Stave,
   StaveNote,
+  StaveTie,
   Voice,
   Formatter,
   Accidental,
@@ -94,6 +95,17 @@ export default function SheetMusicRenderer({
         voice.addTickables(staveNotes);
         new Formatter().joinVoices([voice]).format([voice], width - 80);
         voice.draw(ctx, stave);
+
+        notes.forEach((n, index) => {
+          if (!n.tied_to_next || index >= staveNotes.length - 1) return;
+          const tie = new StaveTie({
+            first_note: staveNotes[index],
+            last_note: staveNotes[index + 1],
+            first_indices: [0],
+            last_indices: [0],
+          });
+          tie.setContext(ctx).draw();
+        });
 
         staveNotes.forEach((sn, index) => {
           const el = sn.getSVGElement?.();

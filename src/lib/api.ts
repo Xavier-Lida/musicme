@@ -1,4 +1,9 @@
-import type { Note, TranscriptionResult } from '@/types/transcription';
+import type {
+  CleanupOptions,
+  Note,
+  RecleanupResult,
+  TranscriptionResult,
+} from '@/types/transcription';
 
 function resolveApiBase(): string {
   const useProxy = process.env.NEXT_PUBLIC_USE_API_PROXY !== 'false';
@@ -15,7 +20,12 @@ function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
 }
 
-export async function transcribeAudio(blob: Blob): Promise<TranscriptionResult> {
+export const DEFAULT_CLEANUP_OPTIONS: CleanupOptions = { preset: 'standard' };
+
+export async function transcribeAudio(
+  blob: Blob,
+  options: CleanupOptions = DEFAULT_CLEANUP_OPTIONS,
+): Promise<TranscriptionResult> {
   const extension = blob.type.includes('wav')
     ? 'wav'
     : blob.type.includes('webm')
@@ -23,6 +33,7 @@ export async function transcribeAudio(blob: Blob): Promise<TranscriptionResult> 
       : 'bin';
   const form = new FormData();
   form.append('file', blob, `recording.${extension}`);
+  form.append('options', JSON.stringify(options));
 
   const res = await fetch(apiUrl('/api/transcribe'), {
     method: 'POST',
@@ -32,6 +43,23 @@ export async function transcribeAudio(blob: Blob): Promise<TranscriptionResult> 
   if (!res.ok) {
     const detail = await res.text().catch(() => res.statusText);
     throw new Error(`Transcription failed: ${res.status} ${detail}`);
+  }
+  return res.json();
+}
+
+export async function recleanupNotes(
+  rawNotes: Note[],
+  options: CleanupOptions,
+): Promise<RecleanupResult> {
+  const res = await fetch(apiUrl('/api/recleanup'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw_notes: rawNotes, options }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => res.statusText);
+    throw new Error(`Recleanup failed: ${res.status} ${detail}`);
   }
   return res.json();
 }
