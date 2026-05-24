@@ -14,6 +14,8 @@ interface AppShellProps {
     key: K,
     value: ProjectMetadata[K],
   ) => void;
+  onExportPdf?: () => void;
+  exportPdfDisabled?: boolean;
   transport: {
     isPlaying: boolean;
     disabled?: boolean;
@@ -31,6 +33,8 @@ export function AppShell({
   infoPanel,
   metadata,
   onFieldChange,
+  onExportPdf,
+  exportPdfDisabled,
   transport,
 }: AppShellProps) {
   const [panelOpen, setPanelOpen] = useState(true);
@@ -42,6 +46,8 @@ export function AppShell({
         onFieldChange={onFieldChange}
         showMobileMenu
         onOpenDrawer={() => setPanelOpen((v) => !v)}
+        onExportPdf={onExportPdf}
+        exportPdfDisabled={exportPdfDisabled}
       />
 
       <div className="daw-content">

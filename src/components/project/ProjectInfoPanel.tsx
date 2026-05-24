@@ -40,7 +40,10 @@ export function ProjectInfoPanel({
   return (
     <div className={cn('w-full', className)}>
       <div className="daw-panel-section">
-        <h2 className="daw-panel-label">Informations</h2>
+        <h2 className="daw-panel-label">Informations de la partition</h2>
+        <p className="text-[10px] text-muted-foreground mb-2 leading-snug">
+          Ces champs apparaissent en en-tête de votre partition lors de l&apos;export PDF.
+        </p>
 
         <div className="daw-field">
           <label htmlFor="project-name" className="daw-field-label">Nom</label>

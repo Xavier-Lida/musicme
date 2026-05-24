@@ -13,6 +13,8 @@ export interface CachedTrack {
   peaks: number[];
   duration: number;
   muted: boolean;
+  // Hides this track's notes from the partition without affecting playback.
+  hidden?: boolean;
   notes: Note[];
   rawNotes: Note[];
   instrument: PlaybackInstrumentId;

@@ -50,6 +50,7 @@ import type { DisplayNote, SelectedNoteRef } from '@/types/display';
 function buildDisplayNotes(tracks: CachedTrack[]): DisplayNote[] {
   const all: DisplayNote[] = [];
   for (const t of tracks) {
+    if (t.hidden) continue;
     for (let i = 0; i < t.notes.length; i++) {
       all.push({
         note: t.notes[i],
@@ -67,7 +68,7 @@ function buildDisplayNotes(tracks: CachedTrack[]): DisplayNote[] {
 }
 
 export default function Page() {
-  const { start, stop, status, error, isRecording } = useAudioRecorder({ click: true });
+  const { start, stop, status, error, isRecording, analyserRef } = useAudioRecorder({ click: true });
   const { metadata, updateField } = useProjectMetadata();
   const [busy, setBusy] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -77,6 +78,8 @@ export default function Page() {
     addTrack,
     deleteTrack,
     toggleMute,
+    toggleHidden,
+    renameTrack,
     setTrackInstrument,
     setTrackNotes,
     clearTracks,
@@ -447,6 +450,26 @@ export default function Page() {
     [toggleMute, persistTracks],
   );
 
+  const handleToggleHidden = useCallback(
+    async (id: string) => {
+      toggleHidden(id);
+      await persistTracks((ts) =>
+        ts.map((t) => (t.id === id ? { ...t, hidden: !t.hidden } : t)),
+      );
+    },
+    [toggleHidden, persistTracks],
+  );
+
+  const handleRenameTrack = useCallback(
+    async (id: string, name: string) => {
+      renameTrack(id, name);
+      await persistTracks((ts) =>
+        ts.map((t) => (t.id === id ? { ...t, name } : t)),
+      );
+    },
+    [renameTrack, persistTracks],
+  );
+
   const handleDeleteTrack = useCallback(
     async (id: string) => {
       deleteTrack(id);
@@ -570,6 +593,8 @@ export default function Page() {
     <AppShell
       metadata={metadata}
       onFieldChange={updateField}
+      onExportPdf={handleExportPdf}
+      exportPdfDisabled={displayNotes.length === 0 || busy || isRecording}
       infoPanel={<ProjectInfoPanel metadata={metadata} onFieldChange={updateField} />}
       transport={{
         isPlaying: playback.isPlaying,
@@ -605,6 +630,7 @@ export default function Page() {
         recleanupAvailable={recleanupAvailable}
         hasResult={!!activeTrack}
         hasRecording={tracks.length > 0}
+        analyserRef={analyserRef}
         onNoteSelect={handleNoteSelect}
         onNotePitchChange={handleNotePitchChange}
         onNoteUpdate={handleNoteUpdate}
@@ -628,9 +654,10 @@ export default function Page() {
         onClearNotes={handleClearNotes}
         onClearSession={handleClearSession}
         onOpenNoteEditor={() => setNoteEditorOpen(true)}
-        onExportPdf={handleExportPdf}
         onSheetSvgReady={handleSheetSvgReady}
         onToggleMute={handleToggleMute}
+        onToggleHidden={handleToggleHidden}
+        onRenameTrack={handleRenameTrack}
         onDeleteTrack={handleDeleteTrack}
         onSelectActiveTrack={setActiveTrackId}
         onTrackInstrumentChange={handleTrackInstrumentChange}

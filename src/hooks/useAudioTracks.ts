@@ -99,6 +99,18 @@ export function useAudioTracks() {
     [],
   );
 
+  const toggleHidden = useCallback((id: string) => {
+    setTracks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, hidden: !t.hidden } : t)),
+    );
+  }, []);
+
+  const renameTrack = useCallback((id: string, name: string) => {
+    setTracks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, name } : t)),
+    );
+  }, []);
+
   const clearTracks = useCallback(() => {
     setTracks([]);
   }, []);
@@ -109,6 +121,8 @@ export function useAudioTracks() {
     addTrack,
     deleteTrack,
     toggleMute,
+    toggleHidden,
+    renameTrack,
     setTrackInstrument,
     setTrackNotes,
     clearTracks,

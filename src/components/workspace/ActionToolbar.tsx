@@ -1,9 +1,9 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, type MutableRefObject } from 'react';
+import { RecordingVisualizer } from '@/components/RecordingVisualizer';
 import {
   FileArrowUpIcon,
-  FilePdfIcon,
   MicrophoneIcon,
   StopIcon,
   TrashIcon,
@@ -31,11 +31,11 @@ interface ActionToolbarProps {
   playing: boolean;
   hasResult: boolean;
   hasNotes: boolean;
+  analyserRef?: MutableRefObject<AnalyserNode | null>;
   onStartRecording: () => void;
   onStopRecording: () => void;
   onUploadAudio: (file: File) => void;
   onClearNotes: () => void;
-  onExportPdf: () => void;
 }
 
 export function ActionToolbar({
@@ -46,11 +46,11 @@ export function ActionToolbar({
   playing,
   hasResult,
   hasNotes,
+  analyserRef,
   onStartRecording,
   onStopRecording,
   onUploadAudio,
   onClearNotes,
-  onExportPdf,
 }: ActionToolbarProps) {
   const audioInputRef = useRef<HTMLInputElement>(null);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
@@ -91,15 +91,24 @@ export function ActionToolbar({
             {isRequestingMic ? 'Accès…' : 'Enregistrer'}
           </Button>
         ) : (
-          <Button
-            size="sm"
-            variant="destructive"
-            onClick={onStopRecording}
-            className="h-8 gap-1.5 animate-pulse bg-red-500 hover:bg-red-600 text-white font-medium"
-          >
-            <StopIcon className="size-4" />
-            Arrêter
-          </Button>
+          <div className="flex items-center gap-3">
+            {analyserRef && (
+              <RecordingVisualizer
+                active={isRecording}
+                analyserRef={analyserRef}
+                size={32}
+              />
+            )}
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={onStopRecording}
+              className="h-8 gap-1.5 bg-red-500 hover:bg-red-600 text-white font-medium"
+            >
+              <StopIcon className="size-4" />
+              Arrêter
+            </Button>
+          </div>
         )}
 
         <Button
@@ -119,17 +128,6 @@ export function ActionToolbar({
           className="sr-only"
           onChange={handleAudioFileChange}
         />
-
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={clearDisabled || !hasNotes}
-          onClick={onExportPdf}
-          className="h-8 gap-1.5 border-border bg-secondary hover:bg-secondary/80 text-foreground"
-        >
-          <FilePdfIcon className="size-4" />
-          Exporter PDF
-        </Button>
 
         <AlertDialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
           <AlertDialogTrigger asChild>

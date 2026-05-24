@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { MutableRefObject } from 'react';
 import { FIXED_BPM } from '@/types/transcription';
 
 type RecorderStatus = 'idle' | 'requesting' | 'recording' | 'stopping' | 'error';
@@ -16,6 +17,8 @@ interface UseAudioRecorderResult {
   start: () => Promise<void>;
   stop: () => Promise<Blob | null>;
   isRecording: boolean;
+  // Live analyser node fed by the active mic stream — null when not recording.
+  analyserRef: MutableRefObject<AnalyserNode | null>;
 }
 
 /**
@@ -36,6 +39,8 @@ export function useAudioRecorder(opts: UseAudioRecorderOptions = {}): UseAudioRe
   const stopPromiseRef = useRef<{ resolve: (b: Blob | null) => void } | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const clickTimerRef = useRef<number | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
 
   const teardown = useCallback(() => {
     if (clickTimerRef.current !== null) {
@@ -44,6 +49,10 @@ export function useAudioRecorder(opts: UseAudioRecorderOptions = {}): UseAudioRe
     }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    micSourceRef.current?.disconnect();
+    micSourceRef.current = null;
+    analyserRef.current?.disconnect();
+    analyserRef.current = null;
     audioCtxRef.current?.close().catch(() => undefined);
     audioCtxRef.current = null;
     mediaRecorderRef.current = null;
@@ -88,8 +97,22 @@ export function useAudioRecorder(opts: UseAudioRecorderOptions = {}): UseAudioRe
         setStatus('idle');
       };
 
+      // AudioContext is needed for both the click track and the live analyser,
+      // so set it up unconditionally now and let click logic skip if disabled.
+      audioCtxRef.current = new AudioContext();
+      const ctx = audioCtxRef.current;
+
+      // Tap the mic into an analyser for the recording visualizer. We do NOT
+      // connect to ctx.destination — otherwise the user hears themselves back.
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.7;
+      source.connect(analyser);
+      micSourceRef.current = source;
+      analyserRef.current = analyser;
+
       if (clickEnabled) {
-        audioCtxRef.current = new AudioContext();
         const quarterMs = 60_000 / bpm;
         clickTimerRef.current = window.setInterval(playClick, quarterMs);
         playClick();
@@ -121,5 +144,6 @@ export function useAudioRecorder(opts: UseAudioRecorderOptions = {}): UseAudioRe
     start,
     stop,
     isRecording: status === 'recording',
+    analyserRef,
   };
 }

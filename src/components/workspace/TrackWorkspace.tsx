@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { AudioTimeline } from '@/components/timeline/AudioTimeline';
 import { ActionToolbar } from '@/components/workspace/ActionToolbar';
 import { SheetToolbar } from '@/components/sheet/SheetToolbar';
@@ -33,6 +33,7 @@ interface TrackWorkspaceProps {
   recleanupAvailable: boolean;
   hasResult: boolean;
   hasRecording: boolean;
+  analyserRef?: MutableRefObject<AnalyserNode | null>;
   onNoteSelect: (trackId: string, indexInTrack: number) => void;
   onNotePitchChange: (trackId: string, indexInTrack: number, newPitch: number) => void;
   onNoteUpdate?: (
@@ -59,9 +60,10 @@ interface TrackWorkspaceProps {
   onClearNotes: () => void;
   onClearSession: () => void;
   onOpenNoteEditor: () => void;
-  onExportPdf: () => void;
   onSheetSvgReady?: (svg: SVGSVGElement | null) => void;
   onToggleMute: (id: string) => void;
+  onToggleHidden: (id: string) => void;
+  onRenameTrack: (id: string, name: string) => void;
   onDeleteTrack: (id: string) => void;
   onSelectActiveTrack: (id: string) => void;
   onTrackInstrumentChange: (id: string, instrument: PlaybackInstrumentId) => void;
@@ -80,6 +82,7 @@ export function TrackWorkspace({
   busy,
   playing,
   hasResult,
+  analyserRef,
   onNoteSelect,
   onNotePitchChange,
   onNoteUpdate,
@@ -95,9 +98,10 @@ export function TrackWorkspace({
   onStopRecording,
   onUploadAudio,
   onClearNotes,
-  onExportPdf,
   onSheetSvgReady,
   onToggleMute,
+  onToggleHidden,
+  onRenameTrack,
   onDeleteTrack,
   onSelectActiveTrack,
   onTrackInstrumentChange,
@@ -161,11 +165,11 @@ export function TrackWorkspace({
           playing={playing}
           hasResult={hasResult}
           hasNotes={notesCount > 0}
+          analyserRef={analyserRef}
           onStartRecording={onStartRecording}
           onStopRecording={onStopRecording}
           onUploadAudio={onUploadAudio}
           onClearNotes={onClearNotes}
-          onExportPdf={onExportPdf}
         />
 
         <AudioTimeline
@@ -175,6 +179,8 @@ export function TrackWorkspace({
           activeTrackId={activeTrackId}
           onSeek={onSeek}
           onToggleMute={onToggleMute}
+          onToggleHidden={onToggleHidden}
+          onRenameTrack={onRenameTrack}
           onDeleteTrack={onDeleteTrack}
           onSelectActiveTrack={onSelectActiveTrack}
           onTrackInstrumentChange={onTrackInstrumentChange}

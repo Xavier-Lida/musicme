@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { WaveformTrack } from '@/components/timeline/WaveformTrack';
 import { FIXED_BPM } from '@/types/transcription';
 import { cn } from '@/lib/utils';
 import type { CachedTrack } from '@/lib/sessionCache';
-import { SpeakerHigh, SpeakerSlash, Trash } from '@phosphor-icons/react';
+import { SpeakerHigh, SpeakerSlash, Trash, Eye, EyeSlash, PencilSimple } from '@phosphor-icons/react';
 import {
   getInstrumentOptions,
   type PlaybackInstrumentId,
@@ -32,6 +32,8 @@ interface AudioTimelineProps {
   activeTrackId: string | null;
   onSeek?: (seconds: number) => void;
   onToggleMute?: (id: string) => void;
+  onToggleHidden?: (id: string) => void;
+  onRenameTrack?: (id: string, name: string) => void;
   onDeleteTrack?: (id: string) => void;
   onSelectActiveTrack?: (id: string) => void;
   onTrackInstrumentChange?: (id: string, instrument: PlaybackInstrumentId) => void;
@@ -51,11 +53,22 @@ export function AudioTimeline({
   activeTrackId,
   onSeek,
   onToggleMute,
+  onToggleHidden,
+  onRenameTrack,
   onDeleteTrack,
   onSelectActiveTrack,
   onTrackInstrumentChange,
   className,
 }: AudioTimelineProps) {
+  const [editingNameId, setEditingNameId] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState('');
+
+  function commitRename(id: string) {
+    const trimmed = draftName.trim();
+    if (trimmed) onRenameTrack?.(id, trimmed);
+    setEditingNameId(null);
+  }
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineWidth = Math.max(duration * PIXELS_PER_SECOND, 320);
 
@@ -123,6 +136,10 @@ export function AudioTimeline({
 
             {tracks.map((track) => {
               const isActive = track.id === activeTrackId;
+              // Waveform spans only the track's own duration — not the full
+              // timeline — so the visual aligns with playback time.
+              const trackWaveWidth = Math.max(8, track.duration * PIXELS_PER_SECOND);
+              const isEditing = editingNameId === track.id;
               return (
                 <div
                   key={track.id}
@@ -145,12 +162,41 @@ export function AudioTimeline({
                         style={{ background: track.color }}
                         aria-hidden
                       />
-                      <span
-                        className="font-semibold text-[10px] text-foreground truncate"
-                        title={track.name}
-                      >
-                        {track.name}
-                      </span>
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          autoFocus
+                          value={draftName}
+                          onChange={(e) => setDraftName(e.target.value)}
+                          onBlur={() => commitRename(track.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitRename(track.id);
+                            else if (e.key === 'Escape') setEditingNameId(null);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="font-semibold text-[10px] text-foreground bg-background/80 border border-border rounded px-1 py-0.5 min-w-0 flex-1 outline-none focus:border-primary"
+                        />
+                      ) : (
+                        <>
+                          <span
+                            className="font-semibold text-[10px] text-foreground truncate flex-1"
+                            title={track.name}
+                          >
+                            {track.name}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDraftName(track.name);
+                              setEditingNameId(track.id);
+                            }}
+                            className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                            title="Renommer la piste"
+                          >
+                            <PencilSimple className="size-3" />
+                          </button>
+                        </>
+                      )}
                     </div>
                     <div className="flex items-center gap-1">
                       <Select
@@ -175,6 +221,19 @@ export function AudioTimeline({
                           </SelectGroup>
                         </SelectContent>
                       </Select>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleHidden?.(track.id);
+                        }}
+                        className={cn(
+                          'p-0.5 rounded hover:bg-muted transition-colors',
+                          track.hidden ? 'text-amber-500' : 'text-muted-foreground hover:text-foreground'
+                        )}
+                        title={track.hidden ? 'Afficher les notes' : 'Masquer les notes'}
+                      >
+                        {track.hidden ? <EyeSlash className="size-3.5" /> : <Eye className="size-3.5" />}
+                      </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -211,12 +270,16 @@ export function AudioTimeline({
                     }}
                     role="presentation"
                   >
-                    <WaveformTrack
-                      peaks={track.peaks}
-                      width={timelineWidth}
-                      height={TRACK_HEIGHT - 8}
-                      flat={track.notes.length === 0}
-                    />
+                    <div
+                      style={{ position: 'absolute', left: 0, top: 0, width: trackWaveWidth }}
+                    >
+                      <WaveformTrack
+                        peaks={track.peaks}
+                        width={trackWaveWidth}
+                        height={TRACK_HEIGHT - 8}
+                        flat={track.notes.length === 0}
+                      />
+                    </div>
                   </div>
                 </div>
               );
