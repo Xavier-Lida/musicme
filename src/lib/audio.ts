@@ -130,13 +130,33 @@ export async function extractWaveformPeaks(blob: Blob, peakCount = 512): Promise
   }
 }
 
+import type { CachedTrack } from '@/lib/sessionCache';
+
 export async function createMelodyPlayer(
   notes: PlayableNote[],
   instrumentId: PlaybackInstrumentId,
   duration: number,
+  tracks?: CachedTrack[],
 ): Promise<MelodyPlayer> {
   await Tone.start();
   const instrument = await getPartitionInstrument(instrumentId);
+
+  // Initialize and sync Tone.Players for all unmuted audio tracks
+  const audioPlayers: Tone.Player[] = [];
+  if (tracks && tracks.length > 0) {
+    for (const track of tracks) {
+      if (track.muted) continue;
+      try {
+        const arrayBuffer = await track.blob.arrayBuffer();
+        const audioBuffer = await Tone.getContext().decodeAudioData(arrayBuffer);
+        const player = new Tone.Player(audioBuffer).toDestination();
+        player.sync().start(0);
+        audioPlayers.push(player);
+      } catch (e) {
+        console.error('Failed to load audio track into Tone.js player:', track.name, e);
+      }
+    }
+  }
 
   let offsetSeconds = 0;
   let isPlaying = false;
@@ -204,7 +224,8 @@ export async function createMelodyPlayer(
   }
 
   function play(): Promise<void> {
-    if (isPlaying || notes.length === 0) return Promise.resolve();
+    if (isPlaying) return Promise.resolve();
+    if (notes.length === 0 && audioPlayers.length === 0) return Promise.resolve();
     if (offsetSeconds >= duration) offsetSeconds = 0;
 
     scheduleFrom(offsetSeconds);
@@ -257,6 +278,10 @@ export async function createMelodyPlayer(
   function dispose() {
     stop();
     listeners.clear();
+    for (const p of audioPlayers) {
+      p.unsync();
+      p.dispose();
+    }
   }
 
   return {

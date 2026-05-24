@@ -5,8 +5,18 @@ const DB_VERSION = 1;
 const STORE = 'session';
 const KEY = 'current';
 
+export interface CachedTrack {
+  id: string;
+  name: string;
+  blob: Blob;
+  peaks: number[];
+  duration: number;
+  muted: boolean;
+}
+
 export type CachedSession = {
-  audio: Blob;
+  tracks?: CachedTrack[];
+  audio?: Blob; // Legacy single audio compatibility
   rawNotes: Note[];
   cleanedNotes: Note[];
   options: CleanupOptions;
@@ -16,7 +26,11 @@ export type CachedSession = {
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(STORE)) {
+        req.result.createObjectStore(STORE);
+      }
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });

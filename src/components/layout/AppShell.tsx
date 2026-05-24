@@ -3,11 +3,14 @@
 import { useState, type ReactNode } from 'react';
 import { AppHeader } from '@/components/layout/AppHeader';
 import { TransportBar } from '@/components/layout/TransportBar';
+import type { ProjectMetadata } from '@/hooks/useProjectMetadata';
 import { cn } from '@/lib/utils';
 
 interface AppShellProps {
   children: ReactNode;
   infoPanel: ReactNode;
+  metadata?: ProjectMetadata;
+  onFieldChange?: <K extends keyof ProjectMetadata>(key: K, value: ProjectMetadata[K]) => void;
   transport: {
     isPlaying: boolean;
     disabled?: boolean;
@@ -21,20 +24,24 @@ interface AppShellProps {
 }
 
 export function AppShell({ children, infoPanel, transport }: AppShellProps) {
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  // Panel open by default — hamburger TOGGLES the SAME left panel (no duplicate drawer)
+  const [panelOpen, setPanelOpen] = useState(true);
 
   return (
     <div className="app-shell">
-      {/* fixed App Header */}
+      {/* Fixed App Header */}
       <AppHeader
         showMobileMenu={true}
-        onOpenDrawer={() => setIsDrawerOpen(true)}
+        onOpenDrawer={() => setPanelOpen((v) => !v)}
       />
 
       {/* Main Content Area */}
       <div className="daw-content">
-        {/* Left config/meta panel (hidden on mobile via CSS) */}
-        <aside className="daw-left" aria-label="Panneau de configuration">
+        {/* Left panel — toggled by hamburger on all screen sizes */}
+        <aside
+          className={cn('daw-left', !panelOpen && 'daw-left--hidden')}
+          aria-label="Panneau de configuration"
+        >
           {infoPanel}
         </aside>
 
@@ -44,37 +51,16 @@ export function AppShell({ children, infoPanel, transport }: AppShellProps) {
         </main>
       </div>
 
-      {/* Mobile Drawer Overlay */}
-      {isDrawerOpen && (
+      {/* Mobile backdrop — only shown on small screens when panel is open */}
+      {panelOpen && (
         <div
-          className="daw-drawer-overlay block"
-          onClick={() => setIsDrawerOpen(false)}
+          className="fixed inset-0 z-[69] bg-black/50 md:hidden"
+          onClick={() => setPanelOpen(false)}
           aria-hidden="true"
         />
       )}
 
-      {/* Mobile Drawer Menu */}
-      <aside
-        className={cn('daw-drawer', isDrawerOpen && 'open')}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Configuration mobile"
-      >
-        <div className="daw-drawer-close">
-          <button
-            onClick={() => setIsDrawerOpen(false)}
-            className="p-2 text-muted-foreground hover:text-foreground text-sm"
-            aria-label="Fermer"
-          >
-            Fermer ✕
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {infoPanel}
-        </div>
-      </aside>
-
-      {/* fixed Transport Footer */}
+      {/* Fixed Transport Footer */}
       <TransportBar
         isPlaying={transport.isPlaying}
         disabled={transport.disabled}

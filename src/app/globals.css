@@ -200,6 +200,27 @@
   flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
+  transition: width 0.2s ease, margin-left 0.2s ease, opacity 0.2s ease, border-right-color 0.2s ease;
+  z-index: 70;
+}
+
+.daw-left.daw-left--hidden {
+  width: 0px;
+  margin-left: -240px;
+  opacity: 0;
+  border-right-color: transparent;
+  pointer-events: none;
+}
+
+@media (max-width: 768px) {
+  .daw-left {
+    position: fixed;
+    top: 56px;
+    bottom: 64px;
+    left: 0;
+    height: calc(100dvh - 56px - 64px);
+    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.4);
+  }
 }
 
 .daw-panel-section {

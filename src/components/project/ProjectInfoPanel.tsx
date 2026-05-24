@@ -12,13 +12,31 @@ interface ProjectInfoPanelProps {
   className?: string;
 }
 
-const INSTRUMENT_OPTIONS = ['Piano', 'Guitare', 'Autre'];
+const INSTRUMENT_OPTIONS = [
+  'Piano',
+  'Guitare acoustique',
+  'Guitare électrique',
+  'Basse',
+  'Violon',
+  'Batterie',
+  'Synthétiseur',
+  'Autre',
+];
 
 export function ProjectInfoPanel({
   metadata,
   onFieldChange,
   className,
 }: ProjectInfoPanelProps) {
+  const selected = metadata.instruments ?? [];
+
+  function toggleInstrument(option: string) {
+    const next = selected.includes(option)
+      ? selected.filter((i) => i !== option)
+      : [...selected, option];
+    onFieldChange('instruments', next);
+  }
+
   return (
     <div className={cn('w-full', className)}>
       <div className="daw-panel-section">
@@ -49,23 +67,36 @@ export function ProjectInfoPanel({
         </div>
 
         <div className="daw-field">
-          <label htmlFor="project-instrument" className="daw-field-label">Instrument</label>
-          <select
-            id="project-instrument"
-            className="daw-select"
-            value={
-              INSTRUMENT_OPTIONS.includes(metadata.instrument)
-                ? metadata.instrument
-                : 'Piano'
-            }
-            onChange={(e) => onFieldChange('instrument', e.target.value)}
-          >
-            {INSTRUMENT_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+          <span className="daw-field-label">Instruments</span>
+          {selected.length > 0 && (
+            <p className="text-[10px] text-muted-foreground mb-1.5">
+              {selected.join(', ')}
+            </p>
+          )}
+          <div className="flex flex-col gap-1">
+            {INSTRUMENT_OPTIONS.map((option) => {
+              const checked = selected.includes(option);
+              return (
+                <label
+                  key={option}
+                  className={cn(
+                    'flex items-center gap-2 px-2 py-1 rounded cursor-pointer text-xs select-none transition-colors',
+                    checked
+                      ? 'bg-primary/15 text-primary'
+                      : 'hover:bg-muted/50 text-muted-foreground',
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    className="accent-primary size-3 cursor-pointer"
+                    checked={checked}
+                    onChange={() => toggleInstrument(option)}
+                  />
+                  {option}
+                </label>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
