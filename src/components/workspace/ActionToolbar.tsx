@@ -32,12 +32,6 @@ import {
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import {
   getInstrumentLabel,
   type PlaybackInstrumentId,
 } from '@/lib/music/partition-instruments';
@@ -76,6 +70,7 @@ interface ActionToolbarProps {
   onResetNotes: () => void;
   onDownloadMidi: () => void;
   onDownloadRecording: () => void;
+  onClearNotes: () => void;
   onClearSession: () => void;
   onOpenNoteEditor: () => void;
 }
@@ -104,6 +99,7 @@ export function ActionToolbar({
   onResetNotes,
   onDownloadMidi,
   onDownloadRecording,
+  onClearNotes,
   onClearSession,
   onOpenNoteEditor,
 }: ActionToolbarProps) {
@@ -116,21 +112,19 @@ export function ActionToolbar({
   }
 
   const actionsDisabled = busy || playing || isRecording;
-  const canClearTrack = hasResult || hasRecording;
 
   function handleClearTrackClick() {
     if (
       !window.confirm(
-        'Effacer l\u2019audio et toutes les notes ? Cette action est irréversible.',
+        'Supprimer toutes les notes de la piste ? L\u2019audio sera conserv\u00e9.',
       )
     ) {
       return;
     }
-    onClearSession();
+    onClearNotes();
   }
 
   return (
-    <TooltipProvider>
     <div className={cn('daw-track-toolbar', className)}>
       <div className="daw-track-toolbar-label">Pistes</div>
 
@@ -200,7 +194,7 @@ export function ActionToolbar({
         <Button
           size="sm"
           variant="outline"
-          disabled={!canClearTrack || actionsDisabled}
+          disabled={!hasNotes || !hasResult || actionsDisabled}
           onClick={handleClearTrackClick}
           className="h-8 gap-1.5 border-border bg-secondary hover:bg-secondary/80 text-foreground"
         >
@@ -219,22 +213,22 @@ export function ActionToolbar({
               <DotsThreeOutlineIcon className="size-5" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56 min-w-48 bg-card border-border">
+          <DropdownMenuContent
+            align="end"
+            side="top"
+            sideOffset={8}
+            collisionPadding={12}
+            className="z-[100] w-56 min-w-48 bg-card border-border"
+          >
             <DropdownMenuGroup>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuItem
-                    disabled={!hasSelectedNote || playing}
-                    onClick={onDeleteSelected}
-                    className="text-xs cursor-pointer"
-                  >
-                    Supprimer la note sélectionnée
-                  </DropdownMenuItem>
-                </TooltipTrigger>
-                <TooltipContent side="left">
-                  Ou sélectionnez une note sur la portée, puis Suppr
-                </TooltipContent>
-              </Tooltip>
+              <DropdownMenuItem
+                disabled={!hasSelectedNote || playing}
+                onClick={onDeleteSelected}
+                title="Sélectionnez une note sur la portée, puis Suppr"
+                className="text-xs cursor-pointer"
+              >
+                Supprimer la note sélectionnée
+              </DropdownMenuItem>
               <DropdownMenuItem
                 disabled={!notesEdited || playing}
                 onClick={onResetNotes}
@@ -295,6 +289,5 @@ export function ActionToolbar({
         </DropdownMenu>
       </div>
     </div>
-    </TooltipProvider>
   );
 }

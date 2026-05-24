@@ -26,7 +26,6 @@ import {
 import { blobToWav, decodeAudioDuration, extractWaveformPeaks } from '@/lib/audio';
 import {
   addNote,
-  computeTimelineSpan,
   findNoteAtSlot,
   removeNoteAt,
   sortNotesByStart,
@@ -139,8 +138,6 @@ export default function Page() {
     },
     [result, updateNotes],
   );
-
-  const timelineSpan = computeTimelineSpan(audioDuration, notes);
 
   const handleResetNotes = useCallback(() => {
     if (!result || !originalNotesRef.current) return;
@@ -307,6 +304,16 @@ export default function Page() {
     [activePreset, cleanupOptions, recleanupAvailable],
   );
 
+  const handleClearNotes = useCallback(async () => {
+    if (!result) return;
+    playback.stop();
+    updateNotes([], null);
+    const cached = await sessionCache.load();
+    if (cached) {
+      await sessionCache.save({ ...cached, cleanedNotes: [] });
+    }
+  }, [result, playback, updateNotes]);
+
   async function handleClearSession() {
     playback.stop();
     await sessionCache.clear();
@@ -393,7 +400,7 @@ export default function Page() {
 
       <TrackWorkspace
         notes={notes}
-        timelineSpan={timelineSpan}
+        timelineDuration={playback.duration}
         peaks={waveformPeaks}
         duration={playback.duration}
         currentTime={playback.currentTime}
@@ -423,6 +430,7 @@ export default function Page() {
         onResetNotes={handleResetNotes}
         onDownloadMidi={handleDownloadMidi}
         onDownloadRecording={handleDownloadRecording}
+        onClearNotes={handleClearNotes}
         onClearSession={handleClearSession}
         onOpenNoteEditor={() => setNoteEditorOpen(true)}
       />

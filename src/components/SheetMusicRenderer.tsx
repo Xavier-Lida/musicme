@@ -11,19 +11,23 @@ import {
   Accidental,
 } from 'vexflow';
 import type { Note } from '@/types/transcription';
-import { FIXED_BPM, SIXTEENTH_SECONDS } from '@/types/transcription';
+import { SIXTEENTH_SECONDS } from '@/types/transcription';
 import {
   STAVE_LEFT,
   STAVE_Y,
   staffClickToStart,
   yToMidiPitch,
 } from '@/lib/music/note-editing';
+import {
+  buildTickableSpecs,
+  secondsToVexDuration,
+} from '@/lib/music/vexflow-layout';
 
 interface Props {
   notes: Note[];
   width?: number;
   height?: number;
-  timelineSpan: number;
+  timelineDuration: number;
   selectedIndex?: number | null;
   onNoteSelect?: (index: number) => void;
   onStaffClick?: (pitch: number, start: number) => void;
@@ -38,21 +42,11 @@ function midiToVexKey(midi: number): { key: string; needsAccidental: boolean } {
   return { key: `${name}/${octave}`, needsAccidental: name.includes('#') };
 }
 
-// Map a duration in seconds to a VexFlow duration string. 120 BPM ⇒ quarter=0.5s.
-function durationToVexFlow(seconds: number): string {
-  const quarters = seconds / (60 / FIXED_BPM);
-  if (quarters >= 4) return 'w';
-  if (quarters >= 2) return 'h';
-  if (quarters >= 1) return 'q';
-  if (quarters >= 0.5) return '8';
-  return '16';
-}
-
 export default function SheetMusicRenderer({
   notes,
   width = 800,
   height = 220,
-  timelineSpan,
+  timelineDuration,
   selectedIndex = null,
   onNoteSelect,
   onStaffClick,
@@ -60,11 +54,12 @@ export default function SheetMusicRenderer({
   const hostRef = useRef<HTMLDivElement>(null);
   const onNoteSelectRef = useRef(onNoteSelect);
   const onStaffClickRef = useRef(onStaffClick);
-  const timelineSpanRef = useRef(timelineSpan);
+  const timelineDurationRef = useRef(timelineDuration);
+  const noteAreaRef = useRef({ left: 0, width: 0 });
 
   onNoteSelectRef.current = onNoteSelect;
   onStaffClickRef.current = onStaffClick;
-  timelineSpanRef.current = timelineSpan;
+  timelineDurationRef.current = timelineDuration;
 
   const staveWidth = width - 20;
 
@@ -83,19 +78,40 @@ export default function SheetMusicRenderer({
     stave.addClef('treble').addTimeSignature('4/4');
     stave.setContext(ctx).draw();
 
+    const noteStartX = stave.getNoteStartX();
+    const noteAreaLeft = noteStartX - STAVE_LEFT;
+    const noteAreaWidth = Math.max(1, staveWidth - noteAreaLeft);
+    noteAreaRef.current = { left: noteAreaLeft, width: noteAreaWidth };
+
     const cleanups: Array<() => void> = [];
 
     if (notes.length > 0) {
-      const staveNotes = notes.map((n, index) => {
-        const { key, needsAccidental } = midiToVexKey(n.pitch);
-        const duration = durationToVexFlow(Math.max(n.end - n.start, SIXTEENTH_SECONDS));
+      const specs = buildTickableSpecs(notes);
+      const staveNotes: StaveNote[] = [];
+      const noteIndicesForStaveNote: number[] = [];
+
+      for (const spec of specs) {
+        if (spec.kind === 'rest') {
+          const dur = `${secondsToVexDuration(spec.durationSec)}r`;
+          staveNotes.push(
+            new StaveNote({ keys: ['b/4'], duration: dur, type: 'r' }),
+          );
+          noteIndicesForStaveNote.push(-1);
+          continue;
+        }
+
+        const { key, needsAccidental } = midiToVexKey(spec.note.pitch);
+        const duration = secondsToVexDuration(
+          Math.max(spec.note.end - spec.note.start, SIXTEENTH_SECONDS),
+        );
         const sn = new StaveNote({ keys: [key], duration });
         if (needsAccidental) sn.addModifier(new Accidental('#'), 0);
-        if (index === selectedIndex) {
+        if (spec.noteIndex === selectedIndex) {
           sn.setStyle({ fillStyle: '#5b8def', strokeStyle: '#3a6ad1' });
         }
-        return sn;
-      });
+        staveNotes.push(sn);
+        noteIndicesForStaveNote.push(spec.noteIndex);
+      }
 
       try {
         const voice = new Voice({ num_beats: staveNotes.length, beat_value: 4 }).setStrict(false);
@@ -103,24 +119,35 @@ export default function SheetMusicRenderer({
         new Formatter().joinVoices([voice]).format([voice], width - 80);
         voice.draw(ctx, stave);
 
-        notes.forEach((n, index) => {
-          if (!n.tied_to_next || index >= staveNotes.length - 1) return;
+        for (let i = 0; i < specs.length; i++) {
+          const spec = specs[i];
+          if (spec.kind !== 'note' || !spec.note.tied_to_next) continue;
+          let nextNoteStaveIdx = -1;
+          for (let j = i + 1; j < specs.length; j++) {
+            if (specs[j].kind === 'note') {
+              nextNoteStaveIdx = j;
+              break;
+            }
+          }
+          if (nextNoteStaveIdx < 0) continue;
           const tie = new StaveTie({
-            first_note: staveNotes[index],
-            last_note: staveNotes[index + 1],
+            first_note: staveNotes[i],
+            last_note: staveNotes[nextNoteStaveIdx],
             first_indices: [0],
             last_indices: [0],
           });
           tie.setContext(ctx).draw();
-        });
+        }
 
-        staveNotes.forEach((sn, index) => {
+        staveNotes.forEach((sn, staveIdx) => {
+          const noteIndex = noteIndicesForStaveNote[staveIdx];
+          if (noteIndex < 0) return;
           const el = sn.getSVGElement?.();
           if (!el) return;
           el.style.cursor = 'pointer';
           const handler = (e: Event) => {
             e.stopPropagation();
-            onNoteSelectRef.current?.(index);
+            onNoteSelectRef.current?.(noteIndex);
           };
           el.addEventListener('click', handler);
           cleanups.push(() => el.removeEventListener('click', handler));
@@ -140,10 +167,18 @@ export default function SheetMusicRenderer({
         const target = e.target as Element;
         if (target.closest('.vf-stavenote')) return;
         const rect = svg.getBoundingClientRect();
+        const scrollParent = host.closest('.daw-sheet-inner');
+        const scrollLeft = scrollParent?.scrollLeft ?? 0;
         const y = e.clientY - rect.top;
-        const xOnStave = e.clientX - rect.left - STAVE_LEFT;
+        const xOnStave = e.clientX - rect.left + scrollLeft - STAVE_LEFT;
         const pitch = yToMidiPitch(y, STAVE_Y);
-        const start = staffClickToStart(xOnStave, staveWidth, timelineSpanRef.current);
+        const { left, width: areaWidth } = noteAreaRef.current;
+        const start = staffClickToStart(
+          xOnStave,
+          left,
+          areaWidth,
+          timelineDurationRef.current,
+        );
         onStaffClickRef.current?.(pitch, start);
       };
       svg.addEventListener('click', staffHandler);
@@ -153,7 +188,7 @@ export default function SheetMusicRenderer({
     return () => {
       for (const cleanup of cleanups) cleanup();
     };
-  }, [notes, width, height, selectedIndex, staveWidth, timelineSpan]);
+  }, [notes, width, height, selectedIndex, staveWidth, timelineDuration]);
 
   return <div ref={hostRef} aria-label="Sheet music" className="sheet-renderer" />;
 }

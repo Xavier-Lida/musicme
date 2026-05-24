@@ -32,7 +32,7 @@ interface TrackWorkspaceProps {
   hasRecording: boolean;
   notesEdited: boolean;
   onNoteSelect: (index: number | null) => void;
-  timelineSpan: number;
+  timelineDuration: number;
   onStaffClick?: (pitch: number, start: number) => void;
   onSeek: (seconds: number) => void;
   onStartRecording: () => void;
@@ -44,6 +44,7 @@ interface TrackWorkspaceProps {
   onResetNotes: () => void;
   onDownloadMidi: () => void;
   onDownloadRecording: () => void;
+  onClearNotes: () => void;
   onClearSession: () => void;
   onOpenNoteEditor: () => void;
 }
@@ -67,7 +68,7 @@ export function TrackWorkspace({
   hasRecording,
   notesEdited,
   onNoteSelect,
-  timelineSpan,
+  timelineDuration,
   onStaffClick,
   onSeek,
   onStartRecording,
@@ -79,6 +80,7 @@ export function TrackWorkspace({
   onResetNotes,
   onDownloadMidi,
   onDownloadRecording,
+  onClearNotes,
   onClearSession,
   onOpenNoteEditor,
 }: TrackWorkspaceProps) {
@@ -109,7 +111,7 @@ export function TrackWorkspace({
             <SheetMusicRenderer
               notes={notes}
               width={sheetWidth}
-              timelineSpan={timelineSpan}
+              timelineDuration={timelineDuration}
               selectedIndex={selectedIndex}
               onNoteSelect={onNoteSelect}
               onStaffClick={hasResult ? onStaffClick : undefined}
@@ -143,6 +145,7 @@ export function TrackWorkspace({
           onResetNotes={onResetNotes}
           onDownloadMidi={onDownloadMidi}
           onDownloadRecording={onDownloadRecording}
+          onClearNotes={onClearNotes}
           onClearSession={onClearSession}
           onOpenNoteEditor={onOpenNoteEditor}
         />

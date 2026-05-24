@@ -78,11 +78,16 @@ export function computeTimelineSpan(audioDuration: number, notes: Note[]): numbe
 
 export function staffClickToStart(
   xOnStave: number,
-  staveWidth: number,
-  timelineSpan: number,
+  noteAreaLeft: number,
+  noteAreaWidth: number,
+  timelineDuration: number,
 ): number {
-  const ratio = Math.max(0, Math.min(1, xOnStave / staveWidth));
-  return quantizeToSixteenth(ratio * timelineSpan);
+  if (noteAreaWidth <= 0) return 0;
+  const ratio = Math.max(
+    0,
+    Math.min(1, (xOnStave - noteAreaLeft) / noteAreaWidth),
+  );
+  return quantizeToSixteenth(ratio * timelineDuration);
 }
 
 export function findNoteAtSlot(
