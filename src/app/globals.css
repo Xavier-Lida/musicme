@@ -207,10 +207,15 @@
 
 .daw-left.daw-left--hidden {
   width: 0px;
-  margin-left: -240px;
   opacity: 0;
   border-right-color: transparent;
   pointer-events: none;
+}
+
+@media (max-width: 768px) {
+  .daw-left.daw-left--hidden {
+    margin-left: -240px;
+  }
 }
 
 @media (max-width: 768px) {
@@ -495,6 +500,12 @@
   height: 54px;
   border-bottom: 1px solid var(--daw-border);
   position: relative;
+  cursor: pointer;
+}
+
+.daw-track-row--active .daw-track-label {
+  background: oklch(0.18 0.04 285);
+  box-shadow: inset 3px 0 0 var(--daw-accent);
 }
 
 .daw-track-label {

@@ -20,22 +20,8 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
-import {
-  getInstrumentLabel,
-  type PlaybackInstrumentId,
-} from '@/lib/music/partition-instruments';
 import { cn } from '@/lib/utils';
-
-const INSTRUMENT_OPTIONS: readonly PlaybackInstrumentId[] = ['piano', 'guitar-acoustic'];
 
 interface ActionToolbarProps {
   className?: string;
@@ -43,13 +29,11 @@ interface ActionToolbarProps {
   isRequestingMic: boolean;
   busy: boolean;
   playing: boolean;
-  instrument: PlaybackInstrumentId;
   hasResult: boolean;
   hasNotes: boolean;
   onStartRecording: () => void;
   onStopRecording: () => void;
   onUploadAudio: (file: File) => void;
-  onInstrumentChange: (id: PlaybackInstrumentId) => void;
   onClearNotes: () => void;
   onExportPdf: () => void;
 }
@@ -60,13 +44,11 @@ export function ActionToolbar({
   isRequestingMic,
   busy,
   playing,
-  instrument,
   hasResult,
   hasNotes,
   onStartRecording,
   onStopRecording,
   onUploadAudio,
-  onInstrumentChange,
   onClearNotes,
   onExportPdf,
 }: ActionToolbarProps) {
@@ -89,12 +71,10 @@ export function ActionToolbar({
 
   return (
     <div className={cn('daw-track-toolbar', className)}>
-      {/* Left spacer — symmetric width keeps buttons centered */}
       <div className="w-[80px] shrink-0 flex items-center">
         <span className="daw-track-toolbar-label text-xs font-semibold text-muted-foreground truncate">Pistes</span>
       </div>
 
-      {/* Centered button group */}
       <div className="flex flex-1 items-center justify-center gap-3">
         {!isRecording ? (
           <Button
@@ -140,24 +120,6 @@ export function ActionToolbar({
           onChange={handleAudioFileChange}
         />
 
-        <Select
-          value={instrument}
-          onValueChange={(value) => onInstrumentChange(value as PlaybackInstrumentId)}
-        >
-          <SelectTrigger className="h-8 w-[100px] border-border bg-secondary text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="bg-card border-border">
-            <SelectGroup>
-              {INSTRUMENT_OPTIONS.map((id) => (
-                <SelectItem key={id} value={id}>
-                  {getInstrumentLabel(id)}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-
         <Button
           size="sm"
           variant="outline"
@@ -185,7 +147,7 @@ export function ActionToolbar({
             <AlertDialogHeader>
               <AlertDialogTitle>Effacer la piste ?</AlertDialogTitle>
               <AlertDialogDescription>
-                Toutes les notes de la partition seront supprimées. Cette action
+                Toutes les notes de la piste active seront supprimées. Cette action
                 est irréversible.
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -201,7 +163,6 @@ export function ActionToolbar({
           </AlertDialogContent>
         </AlertDialog>
       </div>
-      {/* Right spacer to balance the left spacer */}
       <div className="w-[80px] shrink-0" aria-hidden="true" />
     </div>
   );

@@ -130,31 +130,42 @@ export async function extractWaveformPeaks(blob: Blob, peakCount = 512): Promise
   }
 }
 
-import type { CachedTrack } from '@/lib/sessionCache';
+export interface TrackPlayback {
+  id: string;
+  notes: PlayableNote[];
+  instrument: PlaybackInstrumentId;
+  audioBlob?: Blob;
+  muted: boolean;
+}
 
 export async function createMelodyPlayer(
-  notes: PlayableNote[],
-  instrumentId: PlaybackInstrumentId,
+  trackPlaybacks: TrackPlayback[],
   duration: number,
-  tracks?: CachedTrack[],
 ): Promise<MelodyPlayer> {
   await Tone.start();
-  const instrument = await getPartitionInstrument(instrumentId);
 
-  // Initialize and sync Tone.Players for all unmuted audio tracks
+  // Load every distinct instrument used by an unmuted track once.
+  const activeTracks = trackPlaybacks.filter((t) => !t.muted);
+  const instrumentIds = Array.from(new Set(activeTracks.map((t) => t.instrument)));
+  const instruments = new Map<PlaybackInstrumentId, Awaited<ReturnType<typeof getPartitionInstrument>>>();
+  await Promise.all(
+    instrumentIds.map(async (id) => {
+      instruments.set(id, await getPartitionInstrument(id));
+    }),
+  );
+
+  // Audio overlay players for tracks that ship raw audio. Same mute rule as MIDI.
   const audioPlayers: Tone.Player[] = [];
-  if (tracks && tracks.length > 0) {
-    for (const track of tracks) {
-      if (track.muted) continue;
-      try {
-        const arrayBuffer = await track.blob.arrayBuffer();
-        const audioBuffer = await Tone.getContext().decodeAudioData(arrayBuffer);
-        const player = new Tone.Player(audioBuffer).toDestination();
-        player.sync().start(0);
-        audioPlayers.push(player);
-      } catch (e) {
-        console.error('Failed to load audio track into Tone.js player:', track.name, e);
-      }
+  for (const track of activeTracks) {
+    if (!track.audioBlob) continue;
+    try {
+      const arrayBuffer = await track.audioBlob.arrayBuffer();
+      const audioBuffer = await Tone.getContext().decodeAudioData(arrayBuffer);
+      const player = new Tone.Player(audioBuffer).toDestination();
+      player.sync().start(0);
+      audioPlayers.push(player);
+    } catch (e) {
+      console.error('Failed to load audio track into Tone.js player:', track.id, e);
     }
   }
 
@@ -191,28 +202,32 @@ export async function createMelodyPlayer(
   function clearSchedule() {
     Tone.Transport.cancel(0);
     Tone.Transport.stop();
-    instrument.releaseAll();
+    for (const inst of instruments.values()) inst.releaseAll();
   }
 
   function scheduleFrom(time: number) {
     clearSchedule();
     Tone.Transport.seconds = 0;
 
-    for (const note of notes) {
-      if (note.end <= time) continue;
-      const transportTime = note.start - time;
-      const noteDuration = Math.max(0.08, note.end - note.start);
-      const velocity =
-        typeof note.velocity === 'number' ? note.velocity / 127 : undefined;
+    for (const track of activeTracks) {
+      const instrument = instruments.get(track.instrument);
+      if (!instrument) continue;
+      for (const note of track.notes) {
+        if (note.end <= time) continue;
+        const transportTime = note.start - time;
+        const noteDuration = Math.max(0.08, note.end - note.start);
+        const velocity =
+          typeof note.velocity === 'number' ? note.velocity / 127 : undefined;
 
-      Tone.Transport.scheduleOnce((when) => {
-        instrument.triggerAttackRelease(
-          midiToPitch(note.pitch),
-          noteDuration,
-          when,
-          velocity,
-        );
-      }, transportTime);
+        Tone.Transport.scheduleOnce((when) => {
+          instrument.triggerAttackRelease(
+            midiToPitch(note.pitch),
+            noteDuration,
+            when,
+            velocity,
+          );
+        }, transportTime);
+      }
     }
 
     Tone.Transport.scheduleOnce(() => {
@@ -223,9 +238,11 @@ export async function createMelodyPlayer(
     }, duration - time);
   }
 
+  const hasAnyNotes = activeTracks.some((t) => t.notes.length > 0);
+
   function play(): Promise<void> {
     if (isPlaying) return Promise.resolve();
-    if (notes.length === 0 && audioPlayers.length === 0) return Promise.resolve();
+    if (!hasAnyNotes && audioPlayers.length === 0) return Promise.resolve();
     if (offsetSeconds >= duration) offsetSeconds = 0;
 
     scheduleFrom(offsetSeconds);
@@ -309,7 +326,10 @@ export async function playMelody(
   if (notes.length === 0) return;
 
   const lastEnd = notes[notes.length - 1].end;
-  const player = await createMelodyPlayer(notes, instrumentId, lastEnd + 0.6);
+  const player = await createMelodyPlayer(
+    [{ id: 'standalone', notes, instrument: instrumentId, muted: false }],
+    lastEnd + 0.6,
+  );
   await player.play();
 
   await new Promise<void>((resolve) => {

@@ -1,4 +1,5 @@
 import type { CleanupOptions, Note } from '@/types/transcription';
+import type { PlaybackInstrumentId } from '@/lib/music/partition-instruments';
 
 const DB_NAME = 'musicme';
 const DB_VERSION = 1;
@@ -12,13 +13,17 @@ export interface CachedTrack {
   peaks: number[];
   duration: number;
   muted: boolean;
+  notes: Note[];
+  rawNotes: Note[];
+  instrument: PlaybackInstrumentId;
+  color: string;
 }
 
 export type CachedSession = {
   tracks?: CachedTrack[];
   audio?: Blob; // Legacy single audio compatibility
-  rawNotes: Note[];
-  cleanedNotes: Note[];
+  rawNotes?: Note[]; // Legacy
+  cleanedNotes?: Note[]; // Legacy
   options: CleanupOptions;
   createdAt: number;
 };

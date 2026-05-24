@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/layout/AppShell';
 import { ProjectInfoPanel } from '@/components/project/ProjectInfoPanel';
@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/sheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
-import { useAudioTracks } from '@/hooks/useAudioTracks';
+import { useAudioTracks, colorForTrackId } from '@/hooks/useAudioTracks';
 import { useMelodyPlayback } from '@/hooks/useMelodyPlayback';
 import { useProjectMetadata } from '@/hooks/useProjectMetadata';
 import {
@@ -23,7 +23,7 @@ import {
   recleanupNotes,
   transcribeAudio,
 } from '@/lib/api';
-import { blobToWav, decodeAudioDuration, extractWaveformPeaks } from '@/lib/audio';
+import { blobToWav } from '@/lib/audio';
 import {
   addNote,
   findNoteAtSlot,
@@ -32,29 +32,37 @@ import {
 } from '@/lib/music/note-editing';
 import type { PlaybackInstrumentId } from '@/lib/music/partition-instruments';
 import { exportPartitionToPdf } from '@/lib/pdf-export';
-import { sessionCache } from '@/lib/sessionCache';
+import { sessionCache, type CachedTrack } from '@/lib/sessionCache';
 import type {
   CleanupOptions,
   CleanupPreset,
   Note,
-  TranscriptionResult,
 } from '@/types/transcription';
-import { GRID_SUBDIVISION, SIXTEENTH_SECONDS, FIXED_BPM } from '@/types/transcription';
+import { SIXTEENTH_SECONDS } from '@/types/transcription';
+import type { DisplayNote, SelectedNoteRef } from '@/types/display';
 
-const EMPTY_NOTES: Note[] = [];
-
-function applyTranscriptionNotes(
-  transcription: TranscriptionResult,
-  sortedNotes: Note[],
-): TranscriptionResult {
-  return { ...transcription, notes: sortedNotes };
+function buildDisplayNotes(tracks: CachedTrack[]): DisplayNote[] {
+  const all: DisplayNote[] = [];
+  for (const t of tracks) {
+    for (let i = 0; i < t.notes.length; i++) {
+      all.push({
+        note: t.notes[i],
+        trackId: t.id,
+        indexInTrack: i,
+        color: t.muted ? '#666' : t.color,
+      });
+    }
+  }
+  all.sort(
+    (a, b) => a.note.start - b.note.start || a.note.pitch - b.note.pitch,
+  );
+  return all;
 }
 
 export default function Page() {
   const { start, stop, status, error, isRecording } = useAudioRecorder({ click: true });
   const { metadata, updateField } = useProjectMetadata();
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<TranscriptionResult | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
   const {
     tracks,
@@ -62,16 +70,33 @@ export default function Page() {
     addTrack,
     deleteTrack,
     toggleMute,
+    setTrackInstrument,
+    setTrackNotes,
     clearTracks,
   } = useAudioTracks();
-  const [instrument, setInstrument] = useState<PlaybackInstrumentId>('piano');
-  const [selectedNoteIndex, setSelectedNoteIndex] = useState<number | null>(null);
+  const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
+  const [selectedNoteRef, setSelectedNoteRef] = useState<SelectedNoteRef | null>(null);
   const [cleanupOptions, setCleanupOptions] = useState<CleanupOptions>(DEFAULT_CLEANUP_OPTIONS);
-  const [recleanupAvailable, setRecleanupAvailable] = useState(false);
-  const [sessionRestored, setSessionRestored] = useState(false);
   const [noteEditorOpen, setNoteEditorOpen] = useState(false);
-  const originalNotesRef = useRef<Note[] | null>(null);
   const sheetSvgRef = useRef<SVGSVGElement | null>(null);
+
+  const activeTrack = useMemo(
+    () => tracks.find((t) => t.id === activeTrackId) ?? null,
+    [tracks, activeTrackId],
+  );
+
+  // Auto-select the first track when active track is missing.
+  useEffect(() => {
+    if (tracks.length === 0) {
+      if (activeTrackId !== null) setActiveTrackId(null);
+      return;
+    }
+    if (!activeTrackId || !tracks.find((t) => t.id === activeTrackId)) {
+      setActiveTrackId(tracks[0].id);
+    }
+  }, [tracks, activeTrackId]);
+
+  const displayNotes = useMemo(() => buildDisplayNotes(tracks), [tracks]);
 
   const handleSheetSvgReady = useCallback((svg: SVGSVGElement | null) => {
     sheetSvgRef.current = svg;
@@ -79,7 +104,7 @@ export default function Page() {
 
   const handleExportPdf = useCallback(async () => {
     const svg = sheetSvgRef.current;
-    if (!svg || !result || result.notes.length === 0) {
+    if (!svg || displayNotes.length === 0) {
       toast.error('Aucune partition à exporter');
       return;
     }
@@ -90,85 +115,121 @@ export default function Page() {
       const message = e instanceof Error ? e.message : String(e);
       toast.error("Échec de l'export PDF", { description: message });
     }
-  }, [metadata, result]);
+  }, [metadata, displayNotes.length]);
 
-  const notes = result?.notes ?? EMPTY_NOTES;
-  const activePreset = cleanupOptions.preset ?? 'standard';
-
-  // Playback uses raw_notes (matches Spotify demo quality) until the user
-  // edits a note — once they touch the sheet, playback follows their edits.
-  const originalSnapshot = originalNotesRef.current;
-  const playbackEdited = !!(
-    result && originalSnapshot &&
-    JSON.stringify(result.notes) !== JSON.stringify(originalSnapshot)
-  );
-  const playbackNotes =
-    playbackEdited || !result?.raw_notes ? notes : result.raw_notes;
-
-  const playback = useMelodyPlayback({
-    notes: playbackNotes,
-    instrument,
-    tracks,
-  });
+  const playback = useMelodyPlayback({ tracks });
   const stopPlaybackRef = useRef(playback.stop);
   stopPlaybackRef.current = playback.stop;
   const pausePlaybackRef = useRef(playback.pause);
   pausePlaybackRef.current = playback.pause;
 
-  const handleInstrumentChange = useCallback((id: PlaybackInstrumentId) => {
-    pausePlaybackRef.current();
-    setInstrument(id);
-  }, []);
+  const persistTracks = useCallback(async (mutator: (t: CachedTrack[]) => CachedTrack[]) => {
+    const cached = await sessionCache.load();
+    const base = cached?.tracks ?? [];
+    const next = mutator(base);
+    await sessionCache.save({
+      ...(cached ?? { options: cleanupOptions, createdAt: Date.now() }),
+      tracks: next,
+      options: cached?.options ?? cleanupOptions,
+    });
+  }, [cleanupOptions]);
 
-  const updateNotes = useCallback((nextNotes: Note[], selected: number | null) => {
-    setResult((prev) => (prev ? { ...prev, notes: nextNotes } : prev));
-    setSelectedNoteIndex(selected);
-  }, []);
-
-  const handleRemoveNote = useCallback(
-    (index: number) => {
-      if (!result) return;
-      const { notes: updated, selectedIndex } = removeNoteAt(result.notes, index);
-      updateNotes(updated, selectedIndex);
+  const handleTrackInstrumentChange = useCallback(
+    async (trackId: string, id: PlaybackInstrumentId) => {
+      pausePlaybackRef.current();
+      setTrackInstrument(trackId, id);
+      await persistTracks((ts) =>
+        ts.map((t) => (t.id === trackId ? { ...t, instrument: id } : t)),
+      );
     },
-    [result, updateNotes],
+    [setTrackInstrument, persistTracks],
   );
 
-  const handleAddNote = useCallback(
-    (pitch: number, start: number, duration: number) => {
-      if (!result) return;
-      const { notes: updated, selectedIndex } = addNote(result.notes, {
+  const persistTrackNotes = useCallback(
+    async (trackId: string, notes: Note[]) => {
+      await persistTracks((ts) =>
+        ts.map((t) => (t.id === trackId ? { ...t, notes } : t)),
+      );
+    },
+    [persistTracks],
+  );
+
+  const handleRemoveNote = useCallback(
+    (trackId: string, indexInTrack: number) => {
+      const track = tracks.find((t) => t.id === trackId);
+      if (!track) return;
+      const { notes: updated } = removeNoteAt(track.notes, indexInTrack);
+      setTrackNotes(trackId, updated);
+      setSelectedNoteRef(null);
+      persistTrackNotes(trackId, updated);
+    },
+    [tracks, setTrackNotes, persistTrackNotes],
+  );
+
+  const handleAddNoteToTrack = useCallback(
+    (trackId: string, pitch: number, start: number, duration: number) => {
+      const track = tracks.find((t) => t.id === trackId);
+      if (!track) return;
+      const { notes: updated, selectedIndex } = addNote(track.notes, {
         pitch,
         start,
         duration,
       });
-      updateNotes(updated, selectedIndex);
+      setTrackNotes(trackId, updated);
+      setSelectedNoteRef({ trackId, indexInTrack: selectedIndex });
+      persistTrackNotes(trackId, updated);
     },
-    [result, updateNotes],
+    [tracks, setTrackNotes, persistTrackNotes],
+  );
+
+  const handleAddNoteToActiveTrack = useCallback(
+    (pitch: number, start: number, duration: number) => {
+      if (!activeTrackId) return;
+      handleAddNoteToTrack(activeTrackId, pitch, start, duration);
+    },
+    [activeTrackId, handleAddNoteToTrack],
   );
 
   const handleStaffClick = useCallback(
     (pitch: number, start: number) => {
-      if (!result) return;
-      const existingIndex = findNoteAtSlot(result.notes, start, pitch);
+      if (!activeTrackId) return;
+      const track = tracks.find((t) => t.id === activeTrackId);
+      if (!track) return;
+      const existingIndex = findNoteAtSlot(track.notes, start, pitch);
       if (existingIndex !== null) {
-        setSelectedNoteIndex(existingIndex);
+        setSelectedNoteRef({ trackId: activeTrackId, indexInTrack: existingIndex });
         return;
       }
-      const { notes: updated, selectedIndex } = addNote(result.notes, {
-        pitch,
-        start,
-        duration: SIXTEENTH_SECONDS,
-      });
-      updateNotes(updated, selectedIndex);
+      handleAddNoteToTrack(activeTrackId, pitch, start, SIXTEENTH_SECONDS);
     },
-    [result, updateNotes],
+    [activeTrackId, tracks, handleAddNoteToTrack],
+  );
+
+  const handleNoteSelect = useCallback((trackId: string, indexInTrack: number) => {
+    setSelectedNoteRef({ trackId, indexInTrack });
+    setActiveTrackId(trackId);
+  }, []);
+
+  const handleNotePitchChange = useCallback(
+    (trackId: string, indexInTrack: number, newPitch: number) => {
+      const track = tracks.find((t) => t.id === trackId);
+      if (!track) return;
+      const updated = track.notes.map((n, i) =>
+        i === indexInTrack ? { ...n, pitch: newPitch } : n,
+      );
+      setTrackNotes(trackId, updated);
+      persistTrackNotes(trackId, updated);
+    },
+    [tracks, setTrackNotes, persistTrackNotes],
   );
 
   const handleResetNotes = useCallback(() => {
-    if (!result || !originalNotesRef.current) return;
-    updateNotes([...originalNotesRef.current], null);
-  }, [result, updateNotes]);
+    if (!activeTrack) return;
+    const sorted = sortNotesByStart(activeTrack.rawNotes);
+    setTrackNotes(activeTrack.id, sorted);
+    setSelectedNoteRef(null);
+    persistTrackNotes(activeTrack.id, sorted);
+  }, [activeTrack, setTrackNotes, persistTrackNotes]);
 
   const processTranscription = useCallback(
     async (wav: Blob, name: string) => {
@@ -177,26 +238,27 @@ export default function Page() {
       stopPlaybackRef.current();
 
       try {
-        const newTrack = await addTrack(wav, name);
         const transcription = await transcribeAudio(wav, cleanupOptions);
         const sortedNotes = sortNotesByStart(transcription.notes);
-        const rawNotes = transcription.raw_notes;
-        const hasRawNotes = rawNotes !== undefined;
-        const effectiveRaw = rawNotes ?? transcription.notes;
+        const rawNotes = transcription.raw_notes ?? transcription.notes;
 
-        originalNotesRef.current = sortedNotes;
-        setResult(applyTranscriptionNotes(transcription, sortedNotes));
-        setRecleanupAvailable(hasRawNotes);
-        setSelectedNoteIndex(null);
+        const newTrack = await addTrack({
+          blob: wav,
+          name,
+          notes: sortedNotes,
+          rawNotes,
+          instrument: 'piano',
+        });
+
+        setActiveTrackId(newTrack.id);
+        setSelectedNoteRef(null);
 
         const cached = await sessionCache.load();
-        const existingTracks = cached?.tracks || [];
+        const existingTracks = cached?.tracks ?? [];
         const nextTracks = [...existingTracks, newTrack];
 
         await sessionCache.save({
           tracks: nextTracks,
-          rawNotes: effectiveRaw,
-          cleanedNotes: sortedNotes,
           options: cleanupOptions,
           createdAt: Date.now(),
         });
@@ -217,45 +279,37 @@ export default function Page() {
     async function restoreSession() {
       try {
         const cached = await sessionCache.load();
-        if (cancelled || !cached) {
-          setSessionRestored(true);
-          return;
-        }
+        if (cancelled || !cached) return;
 
         if (cached.tracks && cached.tracks.length > 0) {
-          setTracks(cached.tracks);
+          // Backfill missing fields for older cached entries.
+          const migrated: CachedTrack[] = cached.tracks.map((t) => ({
+            ...t,
+            notes: t.notes ?? cached.cleanedNotes ?? [],
+            rawNotes: t.rawNotes ?? cached.rawNotes ?? [],
+            instrument: t.instrument ?? 'piano',
+            color: t.color ?? colorForTrackId(t.id),
+            muted: !!t.muted,
+          }));
+          setTracks(migrated);
+          setActiveTrackId(migrated[0].id);
         } else if (cached.audio) {
-          const duration = await decodeAudioDuration(cached.audio);
-          const peaks = await extractWaveformPeaks(cached.audio);
-          const legacyTrack = {
-            id: 'legacy-track',
-            name: 'Piste Audio',
+          // Legacy single-audio session: rebuild as one track.
+          await addTrack({
             blob: cached.audio,
-            peaks,
-            duration,
-            muted: false,
-          };
-          setTracks([legacyTrack]);
+            name: 'Piste Audio',
+            notes: sortNotesByStart(cached.cleanedNotes ?? []),
+            rawNotes: cached.rawNotes ?? cached.cleanedNotes ?? [],
+            instrument: 'piano',
+          });
         }
 
         setCleanupOptions(cached.options);
-        const sorted = sortNotesByStart(cached.cleanedNotes);
-        originalNotesRef.current = sorted;
-        setResult({
-          bpm: FIXED_BPM,
-          subdivision: GRID_SUBDIVISION,
-          time_signature: '4/4',
-          notes: sorted,
-          raw_notes: cached.rawNotes,
-        });
-        setRecleanupAvailable(cached.rawNotes.length > 0);
       } catch (e) {
         if (!cancelled) {
           const message = e instanceof Error ? e.message : String(e);
           setApiError(message);
         }
-      } finally {
-        if (!cancelled) setSessionRestored(true);
       }
     }
 
@@ -263,21 +317,21 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, [setTracks]);
+  }, [setTracks, addTrack]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (noteEditorOpen) return;
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNoteIndex !== null && result) {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNoteRef) {
         e.preventDefault();
-        handleRemoveNote(selectedNoteIndex);
+        handleRemoveNote(selectedNoteRef.trackId, selectedNoteRef.indexInTrack);
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedNoteIndex, result, handleRemoveNote, noteEditorOpen]);
+  }, [selectedNoteRef, handleRemoveNote, noteEditorOpen]);
 
   useEffect(() => {
     if (error) {
@@ -288,27 +342,21 @@ export default function Page() {
   const handleToggleMute = useCallback(
     async (id: string) => {
       toggleMute(id);
-      const cached = await sessionCache.load();
-      if (cached) {
-        const nextTracks = (cached.tracks || []).map((t) =>
-          t.id === id ? { ...t, muted: !t.muted } : t
-        );
-        await sessionCache.save({ ...cached, tracks: nextTracks });
-      }
+      await persistTracks((ts) =>
+        ts.map((t) => (t.id === id ? { ...t, muted: !t.muted } : t)),
+      );
     },
-    [toggleMute],
+    [toggleMute, persistTracks],
   );
 
   const handleDeleteTrack = useCallback(
     async (id: string) => {
       deleteTrack(id);
-      const cached = await sessionCache.load();
-      if (cached) {
-        const nextTracks = (cached.tracks || []).filter((t) => t.id !== id);
-        await sessionCache.save({ ...cached, tracks: nextTracks });
-      }
+      if (selectedNoteRef?.trackId === id) setSelectedNoteRef(null);
+      if (activeTrackId === id) setActiveTrackId(null);
+      await persistTracks((ts) => ts.filter((t) => t.id !== id));
     },
-    [deleteTrack],
+    [deleteTrack, selectedNoteRef, activeTrackId, persistTracks],
   );
 
   async function handleStopRecording() {
@@ -324,32 +372,28 @@ export default function Page() {
     await processTranscription(wav, file.name);
   }
 
+  const recleanupAvailable = !!activeTrack && activeTrack.rawNotes.length > 0;
+  const activePreset = cleanupOptions.preset ?? 'standard';
+
   const handlePresetChange = useCallback(
     async (preset: CleanupPreset) => {
-      if (preset === activePreset || !recleanupAvailable) return;
-
-      const cached = await sessionCache.load();
-      if (!cached) return;
-
+      if (preset === activePreset || !activeTrack) return;
       setBusy(true);
       setApiError(null);
       const nextOptions: CleanupOptions = { ...cleanupOptions, preset };
 
       try {
-        const { notes: cleaned } = await recleanupNotes(cached.rawNotes, nextOptions);
+        const { notes: cleaned } = await recleanupNotes(activeTrack.rawNotes, nextOptions);
         const sortedNotes = sortNotesByStart(cleaned);
-        originalNotesRef.current = sortedNotes;
+        setTrackNotes(activeTrack.id, sortedNotes);
         setCleanupOptions(nextOptions);
-        setResult((prev) =>
-          prev ? applyTranscriptionNotes(prev, sortedNotes) : prev,
-        );
-        setSelectedNoteIndex(null);
+        setSelectedNoteRef(null);
 
-        await sessionCache.save({
-          ...cached,
-          cleanedNotes: sortedNotes,
-          options: nextOptions,
-        });
+        await persistTracks((ts) =>
+          ts.map((t) => (t.id === activeTrack.id ? { ...t, notes: sortedNotes } : t)),
+        );
+        const cached = await sessionCache.load();
+        if (cached) await sessionCache.save({ ...cached, options: nextOptions });
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         setApiError(message);
@@ -358,35 +402,32 @@ export default function Page() {
         setBusy(false);
       }
     },
-    [activePreset, cleanupOptions, recleanupAvailable],
+    [activePreset, activeTrack, cleanupOptions, setTrackNotes, persistTracks],
   );
 
   const handleClearNotes = useCallback(async () => {
-    if (!result) return;
+    if (!activeTrack) return;
     playback.stop();
-    updateNotes([], null);
-    const cached = await sessionCache.load();
-    if (cached) {
-      await sessionCache.save({ ...cached, cleanedNotes: [] });
-    }
-  }, [result, playback, updateNotes]);
+    setTrackNotes(activeTrack.id, []);
+    setSelectedNoteRef(null);
+    persistTrackNotes(activeTrack.id, []);
+  }, [activeTrack, playback, setTrackNotes, persistTrackNotes]);
 
   async function handleClearSession() {
     playback.stop();
     await sessionCache.clear();
     clearTracks();
-    setResult(null);
     setCleanupOptions(DEFAULT_CLEANUP_OPTIONS);
-    setRecleanupAvailable(false);
-    originalNotesRef.current = null;
-    setSelectedNoteIndex(null);
+    setActiveTrackId(null);
+    setSelectedNoteRef(null);
     setApiError(null);
     toast.success('Session réinitialisée');
   }
 
   async function handleDownloadMidi() {
-    if (!result) return;
-    const blob = await exportMidi(result.notes, result.bpm);
+    const merged = tracks.flatMap((t) => t.notes);
+    if (merged.length === 0) return;
+    const blob = await exportMidi(sortNotesByStart(merged), 120);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -406,11 +447,10 @@ export default function Page() {
     URL.revokeObjectURL(url);
   }
 
-  // playbackEdited (computed above) doubles as notesEdited for UI props.
-  const notesEdited = playbackEdited;
-
+  const allNotesCount = displayNotes.length;
   const presetPickerDisabled = !recleanupAvailable || busy || isRecording || playback.isPlaying;
-  const transportDisabled = busy || isRecording || notes.length === 0;
+  const transportDisabled =
+    busy || isRecording || (allNotesCount === 0 && tracks.length === 0);
 
   let statusLabel = 'Prêt';
   let statusClass = '';
@@ -429,9 +469,7 @@ export default function Page() {
     <AppShell
       metadata={metadata}
       onFieldChange={updateField}
-      infoPanel={
-        <ProjectInfoPanel metadata={metadata} onFieldChange={updateField} />
-      }
+      infoPanel={<ProjectInfoPanel metadata={metadata} onFieldChange={updateField} />}
       transport={{
         isPlaying: playback.isPlaying,
         disabled: transportDisabled,
@@ -450,33 +488,32 @@ export default function Page() {
       )}
 
       <TrackWorkspace
-        notes={notes}
+        displayNotes={displayNotes}
         timelineDuration={playback.duration}
         tracks={tracks}
         duration={playback.duration}
         currentTime={playback.currentTime}
-        selectedIndex={selectedNoteIndex}
+        selectedNoteRef={selectedNoteRef}
+        activeTrackId={activeTrackId}
         isRecording={isRecording}
         isRequestingMic={status === 'requesting'}
         busy={busy}
         playing={playback.isPlaying}
-        instrument={instrument}
         activePreset={activePreset}
         presetPickerDisabled={presetPickerDisabled}
         recleanupAvailable={recleanupAvailable}
-        hasResult={!!result}
+        hasResult={!!activeTrack}
         hasRecording={tracks.length > 0}
-        notesEdited={!!notesEdited}
-        onNoteSelect={setSelectedNoteIndex}
+        onNoteSelect={handleNoteSelect}
+        onNotePitchChange={handleNotePitchChange}
         onStaffClick={handleStaffClick}
         onSeek={playback.seek}
         onStartRecording={start}
         onStopRecording={handleStopRecording}
         onUploadAudio={handleUploadAudio}
-        onInstrumentChange={handleInstrumentChange}
         onPresetChange={handlePresetChange}
         onDeleteSelected={() =>
-          selectedNoteIndex !== null && handleRemoveNote(selectedNoteIndex)
+          selectedNoteRef && handleRemoveNote(selectedNoteRef.trackId, selectedNoteRef.indexInTrack)
         }
         onResetNotes={handleResetNotes}
         onDownloadMidi={handleDownloadMidi}
@@ -488,20 +525,30 @@ export default function Page() {
         onSheetSvgReady={handleSheetSvgReady}
         onToggleMute={handleToggleMute}
         onDeleteTrack={handleDeleteTrack}
+        onSelectActiveTrack={setActiveTrackId}
+        onTrackInstrumentChange={handleTrackInstrumentChange}
       />
 
       <Sheet open={noteEditorOpen} onOpenChange={setNoteEditorOpen}>
         <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
           <SheetHeader>
-            <SheetTitle>Éditeur de notes</SheetTitle>
+            <SheetTitle>
+              Éditeur de notes — {activeTrack?.name ?? '—'}
+            </SheetTitle>
           </SheetHeader>
-          {result && (
+          {activeTrack && (
             <NoteEditor
-              notes={result.notes}
-              selectedIndex={selectedNoteIndex}
-              onSelect={setSelectedNoteIndex}
-              onRemove={handleRemoveNote}
-              onAdd={handleAddNote}
+              notes={activeTrack.notes}
+              selectedIndex={
+                selectedNoteRef?.trackId === activeTrack.id
+                  ? selectedNoteRef.indexInTrack
+                  : null
+              }
+              onSelect={(idx) =>
+                setSelectedNoteRef({ trackId: activeTrack.id, indexInTrack: idx })
+              }
+              onRemove={(idx) => handleRemoveNote(activeTrack.id, idx)}
+              onAdd={handleAddNoteToActiveTrack}
             />
           )}
         </SheetContent>

@@ -1,20 +1,23 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createMelodyPlayer,
   type MelodyPlayer,
   type MelodyPlayerState,
+  type TrackPlayback,
 } from '@/lib/audio';
-import type { PlaybackInstrumentId } from '@/lib/music/partition-instruments';
 import type { Note } from '@/types/transcription';
 
 import type { CachedTrack } from '@/lib/sessionCache';
 
 interface UseMelodyPlaybackOptions {
-  notes: Note[];
-  instrument: PlaybackInstrumentId;
-  tracks?: CachedTrack[];
+  // Per-track playback data. Each entry contributes its notes through its
+  // own instrument when not muted. Audio overlay also follows mute state.
+  tracks: CachedTrack[];
+  // When tracks were edited (raw vs cleaned), the page passes the playback-time
+  // notes per track. Falls back to track.notes otherwise.
+  playbackNotesByTrack?: Map<string, Note[]>;
 }
 
 interface UseMelodyPlaybackResult {
@@ -30,18 +33,36 @@ interface UseMelodyPlaybackResult {
   skipForward: (delta?: number) => void;
 }
 
-function computeDuration(notes: Note[], audioDuration = 0): number {
-  const lastNoteEnd = notes.length > 0 ? notes[notes.length - 1].end : 0;
+function computeDuration(
+  allNotes: { end: number }[],
+  audioDuration = 0,
+): number {
+  const lastNoteEnd = allNotes.length > 0 ? Math.max(...allNotes.map((n) => n.end)) : 0;
   return Math.max(lastNoteEnd + 0.5, audioDuration, 4);
 }
 
 export function useMelodyPlayback({
-  notes,
-  instrument,
-  tracks = [],
+  tracks,
+  playbackNotesByTrack,
 }: UseMelodyPlaybackOptions): UseMelodyPlaybackResult {
+  const trackPlaybacks = useMemo<TrackPlayback[]>(
+    () =>
+      tracks.map((t) => ({
+        id: t.id,
+        notes: playbackNotesByTrack?.get(t.id) ?? t.notes,
+        instrument: t.instrument,
+        audioBlob: t.blob,
+        muted: t.muted,
+      })),
+    [tracks, playbackNotesByTrack],
+  );
+
+  const allNotes = useMemo(
+    () => trackPlaybacks.flatMap((t) => t.notes),
+    [trackPlaybacks],
+  );
   const maxAudioDuration = tracks.length > 0 ? Math.max(...tracks.map((t) => t.duration)) : 0;
-  const duration = computeDuration(notes, maxAudioDuration);
+  const duration = computeDuration(allNotes, maxAudioDuration);
 
   const [state, setState] = useState<MelodyPlayerState>({
     currentTime: 0,
@@ -51,11 +72,6 @@ export function useMelodyPlayback({
 
   const playerRef = useRef<MelodyPlayer | null>(null);
   const genRef = useRef(0);
-  const notesRef = useRef(notes);
-  const instrumentRef = useRef(instrument);
-
-  notesRef.current = notes;
-  instrumentRef.current = instrument;
 
   useEffect(() => {
     setState((prev) => ({ ...prev, duration }));
@@ -66,27 +82,23 @@ export function useMelodyPlayback({
     playerRef.current?.dispose();
     playerRef.current = null;
 
-    const hasUnmutedTracks = tracks.some((t) => !t.muted);
-    if (notesRef.current.length === 0 && !hasUnmutedTracks) {
+    const hasUnmutedAudio = trackPlaybacks.some((t) => !t.muted && t.audioBlob);
+    const hasUnmutedNotes = trackPlaybacks.some((t) => !t.muted && t.notes.length > 0);
+    if (!hasUnmutedAudio && !hasUnmutedNotes) {
       if (gen === genRef.current) {
         setState({ currentTime: 0, duration, isPlaying: false });
       }
       return;
     }
 
-    const player = await createMelodyPlayer(
-      notesRef.current,
-      instrumentRef.current,
-      duration,
-      tracks,
-    );
+    const player = await createMelodyPlayer(trackPlaybacks, duration);
     if (gen !== genRef.current) {
       player.dispose();
       return;
     }
     playerRef.current = player;
     player.subscribe((next) => setState(next));
-  }, [duration, tracks]);
+  }, [duration, trackPlaybacks]);
 
   useEffect(() => {
     syncPlayer();
@@ -94,15 +106,14 @@ export function useMelodyPlayback({
       playerRef.current?.dispose();
       playerRef.current = null;
     };
-  }, [syncPlayer, instrument, notes, tracks]);
+  }, [syncPlayer]);
 
   const play = useCallback(async () => {
-    const hasUnmutedTracks = tracks.some((t) => !t.muted);
-    if (!playerRef.current && (notes.length > 0 || hasUnmutedTracks)) {
+    if (!playerRef.current) {
       await syncPlayer();
     }
     await playerRef.current?.play();
-  }, [notes.length, syncPlayer, tracks]);
+  }, [syncPlayer]);
 
   const pause = useCallback(() => {
     playerRef.current?.pause();

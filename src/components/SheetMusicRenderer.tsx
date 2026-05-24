@@ -18,23 +18,21 @@ import {
   staffClickToStart,
   yToMidiPitch,
 } from '@/lib/music/note-editing';
-import {
-  buildTickableSpecs,
-  secondsToVexDuration,
-} from '@/lib/music/vexflow-layout';
+import { secondsToVexDuration } from '@/lib/music/vexflow-layout';
+import type { DisplayNote, SelectedNoteRef } from '@/types/display';
 
 interface Props {
-  notes: Note[];
+  displayNotes: DisplayNote[];
   width?: number;
   height?: number;
   timelineDuration: number;
-  selectedIndex?: number | null;
-  onNoteSelect?: (index: number) => void;
+  selectedNoteRef?: SelectedNoteRef | null;
+  onNoteSelect?: (trackId: string, indexInTrack: number) => void;
+  onNotePitchChange?: (trackId: string, indexInTrack: number, newPitch: number) => void;
   onStaffClick?: (pitch: number, start: number) => void;
   onSvgReady?: (svg: SVGSVGElement | null) => void;
 }
 
-// MIDI pitch → VexFlow key string (e.g. 60 -> "c/4", 61 -> "c#/4")
 const SHARP_PITCH_NAMES = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
 
 function midiToVexKey(midi: number): { key: string; needsAccidental: boolean } {
@@ -43,24 +41,59 @@ function midiToVexKey(midi: number): { key: string; needsAccidental: boolean } {
   return { key: `${name}/${octave}`, needsAccidental: name.includes('#') };
 }
 
+// Build a flat list of {kind: 'note'|'rest', ...} where rests fill gaps between
+// merged notes so VexFlow spacing reflects timing across all tracks at once.
+interface MergedSpec {
+  kind: 'note' | 'rest';
+  durationSec: number;
+  displayIndex?: number;
+  display?: DisplayNote;
+}
+
+function buildMergedSpecs(displayNotes: DisplayNote[]): MergedSpec[] {
+  if (displayNotes.length === 0) return [];
+  const specs: MergedSpec[] = [];
+  let cursor = 0;
+  const minGap = SIXTEENTH_SECONDS / 2;
+
+  for (let i = 0; i < displayNotes.length; i++) {
+    const d = displayNotes[i];
+    const gap = d.note.start - cursor;
+    if (gap > minGap) {
+      specs.push({ kind: 'rest', durationSec: gap });
+    }
+    specs.push({
+      kind: 'note',
+      durationSec: Math.max(d.note.end - d.note.start, SIXTEENTH_SECONDS),
+      displayIndex: i,
+      display: d,
+    });
+    cursor = Math.max(cursor, d.note.end);
+  }
+  return specs;
+}
+
 export default function SheetMusicRenderer({
-  notes,
+  displayNotes,
   width = 800,
   height = 220,
   timelineDuration,
-  selectedIndex = null,
+  selectedNoteRef = null,
   onNoteSelect,
+  onNotePitchChange,
   onStaffClick,
   onSvgReady,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const onNoteSelectRef = useRef(onNoteSelect);
+  const onNotePitchChangeRef = useRef(onNotePitchChange);
   const onStaffClickRef = useRef(onStaffClick);
   const onSvgReadyRef = useRef(onSvgReady);
   const timelineDurationRef = useRef(timelineDuration);
   const noteAreaRef = useRef({ left: 0, width: 0 });
 
   onNoteSelectRef.current = onNoteSelect;
+  onNotePitchChangeRef.current = onNotePitchChange;
   onStaffClickRef.current = onStaffClick;
   onSvgReadyRef.current = onSvgReady;
   timelineDurationRef.current = timelineDuration;
@@ -90,10 +123,11 @@ export default function SheetMusicRenderer({
 
     const cleanups: Array<() => void> = [];
 
-    if (notes.length > 0) {
-      const specs = buildTickableSpecs(notes);
+    if (displayNotes.length > 0) {
+      const specs = buildMergedSpecs(displayNotes);
       const staveNotes: StaveNote[] = [];
-      const noteIndicesForStaveNote: number[] = [];
+      // Map each stave-note index back to its DisplayNote (or null for rests)
+      const specMeta: Array<{ display: DisplayNote | null }> = [];
 
       for (const spec of specs) {
         if (spec.kind === 'rest') {
@@ -101,61 +135,121 @@ export default function SheetMusicRenderer({
           staveNotes.push(
             new StaveNote({ keys: ['b/4'], duration: dur, type: 'r' }),
           );
-          noteIndicesForStaveNote.push(-1);
+          specMeta.push({ display: null });
           continue;
         }
 
-        const { key, needsAccidental } = midiToVexKey(spec.note.pitch);
-        const duration = secondsToVexDuration(
-          Math.max(spec.note.end - spec.note.start, SIXTEENTH_SECONDS),
-        );
+        const display = spec.display!;
+        const { key, needsAccidental } = midiToVexKey(display.note.pitch);
+        const duration = secondsToVexDuration(spec.durationSec);
         const sn = new StaveNote({ keys: [key], duration });
         if (needsAccidental) sn.addModifier(new Accidental('#'), 0);
-        if (spec.noteIndex === selectedIndex) {
-          sn.setStyle({ fillStyle: '#5b8def', strokeStyle: '#3a6ad1' });
-        }
+
+        const isSelected =
+          selectedNoteRef?.trackId === display.trackId &&
+          selectedNoteRef.indexInTrack === display.indexInTrack;
+
+        sn.setStyle({
+          fillStyle: isSelected ? '#0b3aa8' : display.color,
+          strokeStyle: isSelected ? '#0b3aa8' : display.color,
+        });
         staveNotes.push(sn);
-        noteIndicesForStaveNote.push(spec.noteIndex);
+        specMeta.push({ display });
       }
 
       try {
         const voice = new Voice({ num_beats: staveNotes.length, beat_value: 4 }).setStrict(false);
         voice.addTickables(staveNotes);
-        new Formatter().joinVoices([voice]).format([voice], width - 80);
+        new Formatter().joinVoices([voice]).format([voice], staveWidth - 80);
         voice.draw(ctx, stave);
 
+        // Ties for tied_to_next within a single track (consecutive same-track notes)
         for (let i = 0; i < specs.length; i++) {
-          const spec = specs[i];
-          if (spec.kind !== 'note' || !spec.note.tied_to_next) continue;
-          let nextNoteStaveIdx = -1;
-          for (let j = i + 1; j < specs.length; j++) {
-            if (specs[j].kind === 'note') {
-              nextNoteStaveIdx = j;
+          const meta = specMeta[i];
+          if (!meta.display || !meta.display.note.tied_to_next) continue;
+          // Find next stave note belonging to the same track
+          let nextIdx = -1;
+          for (let j = i + 1; j < specMeta.length; j++) {
+            if (specMeta[j].display?.trackId === meta.display.trackId) {
+              nextIdx = j;
               break;
             }
           }
-          if (nextNoteStaveIdx < 0) continue;
+          if (nextIdx < 0) continue;
           const tie = new StaveTie({
             first_note: staveNotes[i],
-            last_note: staveNotes[nextNoteStaveIdx],
+            last_note: staveNotes[nextIdx],
             first_indices: [0],
             last_indices: [0],
           });
           tie.setContext(ctx).draw();
         }
 
-        staveNotes.forEach((sn, staveIdx) => {
-          const noteIndex = noteIndicesForStaveNote[staveIdx];
-          if (noteIndex < 0) return;
+        // Wire click + drag interactions per note
+        staveNotes.forEach((sn, idx) => {
+          const meta = specMeta[idx];
+          if (!meta.display) return;
           const el = sn.getSVGElement?.();
           if (!el) return;
-          el.style.cursor = 'pointer';
-          const handler = (e: Event) => {
+          el.style.cursor = 'grab';
+
+          const display = meta.display;
+          let dragState: {
+            startY: number;
+            startPitch: number;
+            currentPitch: number;
+            moved: boolean;
+          } | null = null;
+
+          const onMouseDown = (e: MouseEvent) => {
             e.stopPropagation();
-            onNoteSelectRef.current?.(noteIndex);
+            dragState = {
+              startY: e.clientY,
+              startPitch: display.note.pitch,
+              currentPitch: display.note.pitch,
+              moved: false,
+            };
+            el.style.cursor = 'grabbing';
+
+            const onMove = (ev: MouseEvent) => {
+              if (!dragState) return;
+              // One semitone per 5px of vertical drag (drag UP raises pitch).
+              const dy = ev.clientY - dragState.startY;
+              const semitones = Math.round(-dy / 5);
+              const newPitch = Math.max(36, Math.min(96, dragState.startPitch + semitones));
+              if (Math.abs(dy) > 3) dragState.moved = true;
+              if (newPitch !== dragState.currentPitch) {
+                dragState.currentPitch = newPitch;
+              }
+            };
+
+            const onUp = () => {
+              window.removeEventListener('mousemove', onMove);
+              window.removeEventListener('mouseup', onUp);
+              el.style.cursor = 'grab';
+              if (!dragState) return;
+              const ds = dragState;
+              dragState = null;
+              if (!ds.moved) {
+                // Treat as click: select the note
+                onNoteSelectRef.current?.(display.trackId, display.indexInTrack);
+                return;
+              }
+              if (ds.currentPitch !== ds.startPitch) {
+                onNotePitchChangeRef.current?.(
+                  display.trackId,
+                  display.indexInTrack,
+                  ds.currentPitch,
+                );
+              }
+            };
+
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
           };
-          el.addEventListener('click', handler);
-          cleanups.push(() => el.removeEventListener('click', handler));
+
+          el.addEventListener('mousedown', onMouseDown);
+          cleanups.push(() => el.removeEventListener('mousedown', onMouseDown));
         });
       } catch (err) {
         ctx.setFont('sans-serif', 12).fillText(
@@ -194,7 +288,7 @@ export default function SheetMusicRenderer({
       for (const cleanup of cleanups) cleanup();
       onSvgReadyRef.current?.(null);
     };
-  }, [notes, width, height, selectedIndex, staveWidth, timelineDuration]);
+  }, [displayNotes, width, height, selectedNoteRef, staveWidth]);
 
   return <div ref={hostRef} aria-label="Sheet music" className="sheet-renderer" />;
 }

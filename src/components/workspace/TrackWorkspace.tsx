@@ -5,42 +5,41 @@ import { useEffect, useRef, useState } from 'react';
 import { AudioTimeline } from '@/components/timeline/AudioTimeline';
 import { ActionToolbar } from '@/components/workspace/ActionToolbar';
 import type { PlaybackInstrumentId } from '@/lib/music/partition-instruments';
-import type { CleanupPreset, Note } from '@/types/transcription';
+import type { CleanupPreset } from '@/types/transcription';
 import { cn } from '@/lib/utils';
 import { Spinner } from '@/components/ui/spinner';
+import type { CachedTrack } from '@/lib/sessionCache';
+import type { DisplayNote, SelectedNoteRef } from '@/types/display';
 
 const SheetMusicRenderer = dynamic(() => import('@/components/SheetMusicRenderer'), {
   ssr: false,
 });
 
-import type { CachedTrack } from '@/lib/sessionCache';
-
 interface TrackWorkspaceProps {
   className?: string;
-  notes: Note[];
+  displayNotes: DisplayNote[];
   tracks: CachedTrack[];
   duration: number;
   currentTime: number;
-  selectedIndex: number | null;
+  selectedNoteRef: SelectedNoteRef | null;
+  activeTrackId: string | null;
   isRecording: boolean;
   isRequestingMic: boolean;
   busy: boolean;
   playing: boolean;
-  instrument: PlaybackInstrumentId;
   activePreset: CleanupPreset;
   presetPickerDisabled: boolean;
   recleanupAvailable: boolean;
   hasResult: boolean;
   hasRecording: boolean;
-  notesEdited: boolean;
-  onNoteSelect: (index: number | null) => void;
+  onNoteSelect: (trackId: string, indexInTrack: number) => void;
+  onNotePitchChange: (trackId: string, indexInTrack: number, newPitch: number) => void;
   timelineDuration: number;
   onStaffClick?: (pitch: number, start: number) => void;
   onSeek: (seconds: number) => void;
   onStartRecording: () => void;
   onStopRecording: () => void;
   onUploadAudio: (file: File) => void;
-  onInstrumentChange: (id: PlaybackInstrumentId) => void;
   onPresetChange: (preset: CleanupPreset) => void;
   onDeleteSelected: () => void;
   onResetNotes: () => void;
@@ -53,46 +52,38 @@ interface TrackWorkspaceProps {
   onSheetSvgReady?: (svg: SVGSVGElement | null) => void;
   onToggleMute: (id: string) => void;
   onDeleteTrack: (id: string) => void;
+  onSelectActiveTrack: (id: string) => void;
+  onTrackInstrumentChange: (id: string, instrument: PlaybackInstrumentId) => void;
 }
 
 export function TrackWorkspace({
   className,
-  notes,
+  displayNotes,
   tracks,
   duration,
   currentTime,
-  selectedIndex,
+  selectedNoteRef,
+  activeTrackId,
   isRecording,
   isRequestingMic,
   busy,
   playing,
-  instrument,
-  activePreset,
-  presetPickerDisabled,
-  recleanupAvailable,
   hasResult,
-  hasRecording,
-  notesEdited,
   onNoteSelect,
+  onNotePitchChange,
   timelineDuration,
   onStaffClick,
   onSeek,
   onStartRecording,
   onStopRecording,
   onUploadAudio,
-  onInstrumentChange,
-  onPresetChange,
-  onDeleteSelected,
-  onResetNotes,
-  onDownloadMidi,
-  onDownloadRecording,
   onClearNotes,
-  onClearSession,
-  onOpenNoteEditor,
   onExportPdf,
   onSheetSvgReady,
   onToggleMute,
   onDeleteTrack,
+  onSelectActiveTrack,
+  onTrackInstrumentChange,
 }: TrackWorkspaceProps) {
   const sheetContainerRef = useRef<HTMLDivElement>(null);
   const [sheetWidth, setSheetWidth] = useState(800);
@@ -112,18 +103,22 @@ export function TrackWorkspace({
     return () => observer.disconnect();
   }, []);
 
+  const notesCount = displayNotes.length;
+  // Make partition grow with note count so users can horizontally scroll long pieces.
+  const minWidthForNotes = Math.max(sheetWidth, notesCount * 36 + 160);
+
   return (
     <div className={cn('flex flex-col flex-1 h-full overflow-hidden', className)}>
-      {/* 1. Sheet Music / Partition Pane at the top */}
       <div ref={sheetContainerRef} className="daw-sheet-section">
         <div className="daw-sheet-inner">
-          <div className="daw-sheet-frame p-4">
+          <div className="daw-sheet-frame p-4" style={{ width: minWidthForNotes }}>
             <SheetMusicRenderer
-              notes={notes}
-              width={sheetWidth}
+              displayNotes={displayNotes}
+              width={minWidthForNotes - 32}
               timelineDuration={timelineDuration}
-              selectedIndex={selectedIndex}
+              selectedNoteRef={selectedNoteRef}
               onNoteSelect={onNoteSelect}
+              onNotePitchChange={onNotePitchChange}
               onStaffClick={hasResult ? onStaffClick : undefined}
               onSvgReady={onSheetSvgReady}
             />
@@ -131,20 +126,17 @@ export function TrackWorkspace({
         </div>
       </div>
 
-      {/* 2. Track & Audio Timeline Lanes at the bottom */}
       <div className="daw-track-section">
         <ActionToolbar
           isRecording={isRecording}
           isRequestingMic={isRequestingMic}
           busy={busy}
           playing={playing}
-          instrument={instrument}
           hasResult={hasResult}
-          hasNotes={notes.length > 0}
+          hasNotes={notesCount > 0}
           onStartRecording={onStartRecording}
           onStopRecording={onStopRecording}
           onUploadAudio={onUploadAudio}
-          onInstrumentChange={onInstrumentChange}
           onClearNotes={onClearNotes}
           onExportPdf={onExportPdf}
         />
@@ -153,10 +145,12 @@ export function TrackWorkspace({
           tracks={tracks}
           duration={duration}
           currentTime={currentTime}
-          notes={notes}
+          activeTrackId={activeTrackId}
           onSeek={onSeek}
           onToggleMute={onToggleMute}
           onDeleteTrack={onDeleteTrack}
+          onSelectActiveTrack={onSelectActiveTrack}
+          onTrackInstrumentChange={onTrackInstrumentChange}
         />
 
         {busy && (
