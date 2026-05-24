@@ -28,7 +28,7 @@ export function colorForTrackId(id: string): string {
 }
 
 interface AddTrackParams {
-  blob: Blob;
+  blob?: Blob;
   name: string;
   notes?: Note[];
   rawNotes?: Note[];
@@ -44,11 +44,13 @@ export function useAudioTracks() {
     let duration = 0;
     let peaks: number[] = [];
 
-    try {
-      duration = await decodeAudioDuration(blob);
-      peaks = await extractWaveformPeaks(blob);
-    } catch (e) {
-      console.error('Failed to decode track assets', e);
+    if (blob) {
+      try {
+        duration = await decodeAudioDuration(blob);
+        peaks = await extractWaveformPeaks(blob);
+      } catch (e) {
+        console.error('Failed to decode track assets', e);
+      }
     }
 
     const newTrack: CachedTrack = {

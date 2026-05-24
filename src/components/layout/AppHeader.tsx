@@ -65,13 +65,12 @@ export function AppHeader({
       )}
 
       <div className="daw-logo" aria-hidden="true">M</div>
+      <span className="daw-header-title shrink-0">MusicMe</span>
+      <span className="text-muted-foreground/40 shrink-0">/</span>
 
-      {/* Partition info — title is editable inline, subtitle gives author + instruments */}
+      {/* Project title — editable inline, subtitle shows author + instruments */}
       <div className="flex-1 min-w-0 flex flex-col justify-center leading-tight">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/70 shrink-0">
-            Partition
-          </span>
+        <div className="flex items-center gap-1 min-w-0">
           {editingTitle ? (
             <input
               ref={titleInputRef}

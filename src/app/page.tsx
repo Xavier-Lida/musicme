@@ -39,6 +39,7 @@ import {
 } from '@/lib/music/partition-instruments';
 import { exportPartitionToPdf } from '@/lib/pdf-export';
 import { sessionCache, type CachedTrack } from '@/lib/sessionCache';
+import { encodeShareUrl, decodeShareFromHash } from '@/lib/share';
 import type {
   CleanupOptions,
   CleanupPreset,
@@ -363,6 +364,31 @@ export default function Page() {
 
     async function restoreSession() {
       try {
+        // Shared link takes precedence over the IndexedDB session — paste-and-go.
+        if (typeof window !== 'undefined' && window.location.hash) {
+          const shared = decodeShareFromHash(window.location.hash);
+          if (shared) {
+            const migrated: CachedTrack[] = shared.tracks.map((t) => ({
+              ...t,
+              instrument: isPlaybackInstrumentId(t.instrument) ? t.instrument : 'piano',
+              color: t.color ?? colorForTrackId(t.id),
+            }));
+            setTracks(migrated);
+            setActiveTrackId(migrated[0]?.id ?? null);
+            if (migrated[0]) {
+              historyTrackIdRef.current = migrated[0].id;
+              resetHistory(migrated[0].notes ?? []);
+            }
+            (Object.keys(shared.metadata) as Array<keyof typeof shared.metadata>).forEach(
+              (k) => updateField(k, shared.metadata[k] as never),
+            );
+            // Clear the hash so reloads don't replay it over fresh edits.
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+            toast.success('Partition partagée chargée');
+            return;
+          }
+        }
+
         const cached = await sessionCache.load();
         if (cancelled || !cached) return;
 
@@ -405,7 +431,7 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, [setTracks, addTrack, resetHistory]);
+  }, [setTracks, addTrack, resetHistory, updateField]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -479,6 +505,38 @@ export default function Page() {
     },
     [deleteTrack, selectedNoteRef, activeTrackId, persistTracks],
   );
+
+  const handleShare = useCallback(async () => {
+    if (tracks.length === 0) {
+      toast.error('Rien à partager — ajoute au moins une piste');
+      return;
+    }
+    const url = encodeShareUrl(window.location.origin, metadata, tracks);
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Lien copié dans le presse-papier', {
+        description: 'Colle-le où tu veux pour partager ta partition',
+      });
+    } catch {
+      window.prompt('Copie ce lien pour partager :', url);
+    }
+  }, [tracks, metadata]);
+
+  const handleAddManualTrack = useCallback(async () => {
+    const trackName = `Piste ${tracks.length + 1}`;
+    const newTrack = await addTrack({ name: trackName, instrument: 'piano' });
+    setActiveTrackId(newTrack.id);
+    setSelectedNoteRef(null);
+
+    const cached = await sessionCache.load();
+    const existingTracks = cached?.tracks ?? [];
+    const nextTracks = [...existingTracks, newTrack];
+    await sessionCache.save({
+      tracks: nextTracks,
+      options: cached?.options ?? cleanupOptions,
+      createdAt: cached?.createdAt ?? Date.now(),
+    });
+  }, [addTrack, tracks.length, cleanupOptions]);
 
   async function handleStopRecording() {
     const blob = await stop();
@@ -561,12 +619,12 @@ export default function Page() {
   }
 
   function handleDownloadRecording() {
-    const firstTrack = tracks[0];
-    if (!firstTrack) return;
-    const url = URL.createObjectURL(firstTrack.blob);
+    const firstAudioTrack = tracks.find((t) => t.blob);
+    if (!firstAudioTrack?.blob) return;
+    const url = URL.createObjectURL(firstAudioTrack.blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${firstTrack.name || 'enregistrement'}-${Date.now()}.wav`;
+    a.download = `${firstAudioTrack.name || 'enregistrement'}-${Date.now()}.wav`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -595,6 +653,8 @@ export default function Page() {
       onFieldChange={updateField}
       onExportPdf={handleExportPdf}
       exportPdfDisabled={displayNotes.length === 0 || busy || isRecording}
+      onShare={handleShare}
+      shareDisabled={tracks.length === 0 || busy || isRecording}
       infoPanel={<ProjectInfoPanel metadata={metadata} onFieldChange={updateField} />}
       transport={{
         isPlaying: playback.isPlaying,
@@ -661,6 +721,7 @@ export default function Page() {
         onDeleteTrack={handleDeleteTrack}
         onSelectActiveTrack={setActiveTrackId}
         onTrackInstrumentChange={handleTrackInstrumentChange}
+        onAddManualTrack={handleAddManualTrack}
       />
 
       <Sheet open={noteEditorOpen} onOpenChange={setNoteEditorOpen}>

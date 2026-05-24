@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { FilePdfIcon } from '@phosphor-icons/react';
+import { FilePdfIcon, ShareNetworkIcon } from '@phosphor-icons/react';
 import { AppHeader } from '@/components/layout/AppHeader';
 import { TransportBar } from '@/components/layout/TransportBar';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,8 @@ interface AppShellProps {
   ) => void;
   onExportPdf?: () => void;
   exportPdfDisabled?: boolean;
+  onShare?: () => void;
+  shareDisabled?: boolean;
   transport: {
     isPlaying: boolean;
     disabled?: boolean;
@@ -37,6 +39,8 @@ export function AppShell({
   onFieldChange,
   onExportPdf,
   exportPdfDisabled,
+  onShare,
+  shareDisabled,
   transport,
 }: AppShellProps) {
   const [panelOpen, setPanelOpen] = useState(true);
@@ -56,17 +60,30 @@ export function AppShell({
           aria-label="Panneau de configuration"
         >
           <div className="flex-1 min-h-0 overflow-y-auto">{infoPanel}</div>
-          {onExportPdf && (
-            <div className="daw-sidebar-footer">
-              <Button
-                variant="default"
-                onClick={onExportPdf}
-                disabled={exportPdfDisabled}
-                className="w-full gap-2 h-10"
-              >
-                <FilePdfIcon className="size-4" />
-                Exporter PDF
-              </Button>
+          {(onExportPdf || onShare) && (
+            <div className="daw-sidebar-footer flex flex-col gap-2">
+              {onShare && (
+                <Button
+                  variant="outline"
+                  onClick={onShare}
+                  disabled={shareDisabled}
+                  className="w-full gap-2 h-10"
+                >
+                  <ShareNetworkIcon className="size-4" />
+                  Partager le projet
+                </Button>
+              )}
+              {onExportPdf && (
+                <Button
+                  variant="default"
+                  onClick={onExportPdf}
+                  disabled={exportPdfDisabled}
+                  className="w-full gap-2 h-10"
+                >
+                  <FilePdfIcon className="size-4" />
+                  Exporter PDF
+                </Button>
+              )}
             </div>
           )}
         </aside>

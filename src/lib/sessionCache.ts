@@ -9,7 +9,8 @@ const KEY = 'current';
 export interface CachedTrack {
   id: string;
   name: string;
-  blob: Blob;
+  // Optional — manual tracks have no recorded audio, just MIDI notes.
+  blob?: Blob;
   peaks: number[];
   duration: number;
   muted: boolean;

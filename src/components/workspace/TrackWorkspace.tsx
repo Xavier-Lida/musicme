@@ -67,6 +67,7 @@ interface TrackWorkspaceProps {
   onDeleteTrack: (id: string) => void;
   onSelectActiveTrack: (id: string) => void;
   onTrackInstrumentChange: (id: string, instrument: PlaybackInstrumentId) => void;
+  onAddManualTrack?: () => void;
 }
 
 export function TrackWorkspace({
@@ -105,6 +106,7 @@ export function TrackWorkspace({
   onDeleteTrack,
   onSelectActiveTrack,
   onTrackInstrumentChange,
+  onAddManualTrack,
 }: TrackWorkspaceProps) {
   const sheetContainerRef = useRef<HTMLDivElement>(null);
   const [sheetWidth, setSheetWidth] = useState(800);
@@ -184,6 +186,7 @@ export function TrackWorkspace({
           onDeleteTrack={onDeleteTrack}
           onSelectActiveTrack={onSelectActiveTrack}
           onTrackInstrumentChange={onTrackInstrumentChange}
+          onAddManualTrack={onAddManualTrack}
         />
 
         {busy && (

@@ -37,6 +37,7 @@ interface AudioTimelineProps {
   onDeleteTrack?: (id: string) => void;
   onSelectActiveTrack?: (id: string) => void;
   onTrackInstrumentChange?: (id: string, instrument: PlaybackInstrumentId) => void;
+  onAddManualTrack?: () => void;
   className?: string;
 }
 
@@ -58,6 +59,7 @@ export function AudioTimeline({
   onDeleteTrack,
   onSelectActiveTrack,
   onTrackInstrumentChange,
+  onAddManualTrack,
   className,
 }: AudioTimelineProps) {
   const [editingNameId, setEditingNameId] = useState<string | null>(null);
@@ -300,8 +302,21 @@ export function AudioTimeline({
                   onClick={handleTimelineClick}
                   role="presentation"
                 >
-                  Glissez un fichier audio ou enregistrez pour commencer
+                  Glissez un fichier audio, enregistrez, ou ajoutez une piste manuelle ci-dessous
                 </div>
+              </div>
+            )}
+
+            {onAddManualTrack && (
+              <div className="px-3 py-2 border-t border-border/60">
+                <button
+                  type="button"
+                  onClick={onAddManualTrack}
+                  className="daw-add-track-btn"
+                >
+                  <span className="text-base leading-none">+</span>
+                  Ajouter une piste
+                </button>
               </div>
             )}
           </div>
