@@ -33,7 +33,10 @@ import {
   sortNotesByStart,
   updateNoteAt,
 } from '@/lib/music/note-editing';
-import type { PlaybackInstrumentId } from '@/lib/music/partition-instruments';
+import {
+  isPlaybackInstrumentId,
+  type PlaybackInstrumentId,
+} from '@/lib/music/partition-instruments';
 import { exportPartitionToPdf } from '@/lib/pdf-export';
 import { sessionCache, type CachedTrack } from '@/lib/sessionCache';
 import type {
@@ -53,6 +56,7 @@ function buildDisplayNotes(tracks: CachedTrack[]): DisplayNote[] {
         trackId: t.id,
         indexInTrack: i,
         color: t.muted ? '#666' : t.color,
+        instrument: t.instrument ?? 'piano',
       });
     }
   }
@@ -364,7 +368,10 @@ export default function Page() {
             ...t,
             notes: t.notes ?? cached.cleanedNotes ?? [],
             rawNotes: t.rawNotes ?? cached.rawNotes ?? [],
-            instrument: t.instrument ?? 'piano',
+            instrument:
+              t.instrument && isPlaybackInstrumentId(t.instrument)
+                ? t.instrument
+                : 'piano',
             color: t.color ?? colorForTrackId(t.id),
             muted: !!t.muted,
           }));

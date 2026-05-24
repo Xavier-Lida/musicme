@@ -75,7 +75,7 @@ export function TabNote({
 
   return (
     <g
-      className={`sheet-tab-number${selected ? ' sheet-note--selected' : ''}`}
+      className={`sheet-note sheet-tab-number${selected ? ' sheet-note--selected' : ''}`}
       style={{ cursor: dragging ? 'grabbing' : 'grab' }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}

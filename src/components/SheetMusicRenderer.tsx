@@ -4,18 +4,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { InteractiveNote } from '@/components/sheet/InteractiveNote';
 import { NoteEditPopover } from '@/components/sheet/NoteEditPopover';
 import { StaffLines, TimeSignature } from '@/components/sheet/StaffLines';
+import { TabNote } from '@/components/sheet/TabNote';
 import { BassClef, GrandStaffBrace, TrebleClef } from '@/components/sheet/clefs';
 import { staffClickToStart } from '@/lib/music/note-editing';
+import { getInstrumentDefinition, getNotationKind } from '@/lib/music/instrument-registry';
+import type { PlaybackInstrumentId } from '@/lib/music/instrument-registry';
+import { tabLineYs, yToGuitarMidi } from '@/lib/music/guitar-tab';
 import {
   BASS_STAVE_Y,
   NOTE_AREA_LEFT,
+  SINGLE_STAVE_Y,
+  TAB_TOP,
   TREBLE_STAVE_Y,
-  computeGrandStaffLayout,
+  buildSheetLayout,
+  clefForNote,
   computeSheetWidth,
-  pitchToGrandStaffY,
-  splitNoteForPiano,
+  pitchToNoteY,
   timeToX,
-  yToGrandStaffPitch,
+  yToNotePitch,
 } from '@/lib/music/staff-geometry';
 import type { DisplayNote, SelectedNoteRef } from '@/types/display';
 
@@ -24,6 +30,7 @@ interface Props {
   width?: number;
   timelineDuration: number;
   selectedNoteRef?: SelectedNoteRef | null;
+  activeTrackInstrument?: PlaybackInstrumentId | null;
   onNoteSelect?: (trackId: string, indexInTrack: number) => void;
   onNotePitchChange?: (trackId: string, indexInTrack: number, newPitch: number) => void;
   onNoteUpdate?: (
@@ -54,6 +61,7 @@ export default function SheetMusicRenderer({
   width = 800,
   timelineDuration,
   selectedNoteRef = null,
+  activeTrackInstrument = null,
   onNoteSelect,
   onNotePitchChange,
   onNoteUpdate,
@@ -68,15 +76,28 @@ export default function SheetMusicRenderer({
 
   const sheetWidth = computeSheetWidth(width, timelineDuration);
 
-  const displayedPitches = useMemo(
+  const layoutItems = useMemo(
     () =>
-      displayNotes.map((d) => previewPitches[noteKey(d)] ?? d.note.pitch),
+      displayNotes.map((d) => ({
+        pitch: previewPitches[noteKey(d)] ?? d.note.pitch,
+        notationKind: getNotationKind(d.instrument),
+      })),
     [displayNotes, previewPitches],
   );
 
-  const { offsetY, height } = useMemo(
-    () => computeGrandStaffLayout(displayedPitches),
-    [displayedPitches],
+  const sheetLayout = useMemo(
+    () => buildSheetLayout(layoutItems),
+    [layoutItems],
+  );
+
+  const { offsetY, height, mode, hasGrandStaff, hasTab, tabTop } = sheetLayout;
+
+  const activeDef = useMemo(
+    () =>
+      activeTrackInstrument
+        ? getInstrumentDefinition(activeTrackInstrument)
+        : null,
+    [activeTrackInstrument],
   );
 
   useEffect(() => {
@@ -90,8 +111,25 @@ export default function SheetMusicRenderer({
   }, []);
 
   const yToPitchAtOffset = useCallback(
-    (svgY: number) => yToGrandStaffPitch(svgY - offsetY),
-    [offsetY],
+    (svgY: number) => {
+      const localY = svgY - offsetY;
+      const pitchMin = activeDef?.pitchMin;
+      const pitchMax = activeDef?.pitchMax;
+      const activeKind = activeDef?.notationKind;
+
+      if (activeKind === 'tab') {
+        return yToGuitarMidi(localY, tabTop);
+      }
+
+      return yToNotePitch(
+        localY,
+        sheetLayout,
+        activeKind,
+        pitchMin,
+        pitchMax,
+      );
+    },
+    [offsetY, activeDef, sheetLayout, tabTop],
   );
 
   const handleStaffBackgroundClick = useCallback(
@@ -113,13 +151,17 @@ export default function SheetMusicRenderer({
   );
 
   const makeYToPitch = useCallback(
-    (svg: SVGSVGElement) => {
+    (svg: SVGSVGElement, notationKind: ReturnType<typeof getNotationKind>, instrumentId: PlaybackInstrumentId) => {
+      const def = getInstrumentDefinition(instrumentId);
       return (clientY: number) => {
-        const y = clientYToSvgY(svg, clientY);
-        return yToPitchAtOffset(y);
+        const y = clientYToSvgY(svg, clientY) - offsetY;
+        if (notationKind === 'tab') {
+          return yToGuitarMidi(y, tabTop);
+        }
+        return yToNotePitch(y, sheetLayout, notationKind, def.pitchMin, def.pitchMax);
       };
     },
-    [yToPitchAtOffset],
+    [offsetY, sheetLayout, tabTop],
   );
 
   function openEditPopover(
@@ -132,69 +174,167 @@ export default function SheetMusicRenderer({
     setAnchorPoint({ x: clientX, y: clientY });
   }
 
-  function renderPianoStaff() {
+  function renderStaffBackground() {
     const staffWidth = sheetWidth - NOTE_AREA_LEFT;
+
+    if (mode === 'tab') {
+      return (
+        <>
+          {tabLineYs(TAB_TOP).map((y) => (
+            <line
+              key={`tab-${y}`}
+              x1={NOTE_AREA_LEFT}
+              y1={y}
+              x2={sheetWidth}
+              y2={y}
+              stroke="#333"
+              strokeWidth={1}
+            />
+          ))}
+        </>
+      );
+    }
+
+    if (mode === 'treble') {
+      return (
+        <>
+          <StaffLines staveTop={SINGLE_STAVE_Y} width={staffWidth} x={NOTE_AREA_LEFT} />
+          <TrebleClef y={SINGLE_STAVE_Y + 32} />
+          <TimeSignature x={52} staveTop={SINGLE_STAVE_Y} />
+        </>
+      );
+    }
+
+    if (mode === 'bass') {
+      return (
+        <>
+          <StaffLines staveTop={SINGLE_STAVE_Y} width={staffWidth} x={NOTE_AREA_LEFT} />
+          <BassClef y={SINGLE_STAVE_Y + 28} />
+          <TimeSignature x={52} staveTop={SINGLE_STAVE_Y} />
+        </>
+      );
+    }
+
+    if (hasGrandStaff) {
+      return (
+        <>
+          <GrandStaffBrace
+            x={NOTE_AREA_LEFT - 8}
+            y={TREBLE_STAVE_Y - 4}
+            height={BASS_STAVE_Y - TREBLE_STAVE_Y + 44}
+          />
+          <StaffLines staveTop={TREBLE_STAVE_Y} width={staffWidth} x={NOTE_AREA_LEFT} />
+          <StaffLines staveTop={BASS_STAVE_Y} width={staffWidth} x={NOTE_AREA_LEFT} />
+          <TrebleClef y={TREBLE_STAVE_Y + 32} />
+          <BassClef y={BASS_STAVE_Y + 28} />
+          <TimeSignature x={52} staveTop={TREBLE_STAVE_Y} />
+          <TimeSignature x={52} staveTop={BASS_STAVE_Y} />
+        </>
+      );
+    }
+
+    return null;
+  }
+
+  function renderTabSection() {
+    if (!hasTab || mode === 'tab') return null;
 
     return (
       <>
-        <GrandStaffBrace
-          x={NOTE_AREA_LEFT - 8}
-          y={TREBLE_STAVE_Y - 4}
-          height={BASS_STAVE_Y - TREBLE_STAVE_Y + 44}
-        />
-        <StaffLines staveTop={TREBLE_STAVE_Y} width={staffWidth} x={NOTE_AREA_LEFT} />
-        <StaffLines staveTop={BASS_STAVE_Y} width={staffWidth} x={NOTE_AREA_LEFT} />
-        <TrebleClef y={TREBLE_STAVE_Y + 32} />
-        <BassClef y={BASS_STAVE_Y + 28} />
-        <TimeSignature x={52} staveTop={TREBLE_STAVE_Y} />
-        <TimeSignature x={52} staveTop={BASS_STAVE_Y} />
-
-        {displayNotes.map((d) => {
-          const key = noteKey(d);
-          const pitch = previewPitches[key] ?? d.note.pitch;
-          const clef = splitNoteForPiano(pitch);
-          const x = timeToX(d.note.start);
-          const y = pitchToGrandStaffY(pitch);
-          const svg = svgRef.current;
-          if (!svg) return null;
-
-          const selected =
-            selectedNoteRef?.trackId === d.trackId &&
-            selectedNoteRef.indexInTrack === d.indexInTrack;
-
-          return (
-            <InteractiveNote
-              key={`${key}-${d.note.start}-${d.note.pitch}`}
-              x={x}
-              y={y}
-              pitch={pitch}
-              clef={clef}
-              selected={selected}
-              noteColor={d.color}
-              yToPitch={makeYToPitch(svg)}
-              onPitchPreview={(p) =>
-                setPreviewPitches((prev) => ({ ...prev, [key]: p }))
-              }
-              onPitchCommit={(p) => {
-                setPreviewPitches((prev) => {
-                  const next = { ...prev };
-                  delete next[key];
-                  return next;
-                });
-                onNotePitchChange?.(d.trackId, d.indexInTrack, p);
-              }}
-              onEditRequest={(clientX, clientY) =>
-                openEditPopover(
-                  { trackId: d.trackId, indexInTrack: d.indexInTrack },
-                  clientX,
-                  clientY,
-                )
-              }
-            />
-          );
-        })}
+        {tabLineYs(tabTop).map((y) => (
+          <line
+            key={`tab-${y}`}
+            x1={NOTE_AREA_LEFT}
+            y1={y}
+            x2={sheetWidth}
+            y2={y}
+            stroke="#333"
+            strokeWidth={1}
+          />
+        ))}
       </>
     );
+  }
+
+  function renderNotes() {
+    const svg = svgRef.current;
+    if (!svg) return null;
+
+    return displayNotes.map((d) => {
+      const key = noteKey(d);
+      const pitch = previewPitches[key] ?? d.note.pitch;
+      const notationKind = getNotationKind(d.instrument);
+      const x = timeToX(d.note.start);
+      const selected =
+        selectedNoteRef?.trackId === d.trackId &&
+        selectedNoteRef.indexInTrack === d.indexInTrack;
+
+      if (notationKind === 'tab') {
+        const noteTabTop = mode === 'tab' ? TAB_TOP : tabTop;
+        return (
+          <TabNote
+            key={`${key}-${d.note.start}-${d.note.pitch}`}
+            x={x}
+            pitch={pitch}
+            tabTop={noteTabTop}
+            selected={selected}
+            onPitchPreview={(p) =>
+              setPreviewPitches((prev) => ({ ...prev, [key]: p }))
+            }
+            onPitchCommit={(p) => {
+              setPreviewPitches((prev) => {
+                const next = { ...prev };
+                delete next[key];
+                return next;
+              });
+              onNotePitchChange?.(d.trackId, d.indexInTrack, p);
+            }}
+            onEditRequest={(clientX, clientY) =>
+              openEditPopover(
+                { trackId: d.trackId, indexInTrack: d.indexInTrack },
+                clientX,
+                clientY,
+              )
+            }
+            yToPitch={makeYToPitch(svg, notationKind, d.instrument)}
+          />
+        );
+      }
+
+      const clef = clefForNote(pitch, notationKind, mode);
+      const y = pitchToNoteY(pitch, notationKind, mode);
+
+      return (
+        <InteractiveNote
+          key={`${key}-${d.note.start}-${d.note.pitch}`}
+          x={x}
+          y={y}
+          pitch={pitch}
+          clef={clef}
+          selected={selected}
+          noteColor={d.color}
+          yToPitch={makeYToPitch(svg, notationKind, d.instrument)}
+          onPitchPreview={(p) =>
+            setPreviewPitches((prev) => ({ ...prev, [key]: p }))
+          }
+          onPitchCommit={(p) => {
+            setPreviewPitches((prev) => {
+              const next = { ...prev };
+              delete next[key];
+              return next;
+            });
+            onNotePitchChange?.(d.trackId, d.indexInTrack, p);
+          }}
+          onEditRequest={(clientX, clientY) =>
+            openEditPopover(
+              { trackId: d.trackId, indexInTrack: d.indexInTrack },
+              clientX,
+              clientY,
+            )
+          }
+        />
+      );
+    });
   }
 
   const editDisplay =
@@ -217,7 +357,11 @@ export default function SheetMusicRenderer({
         style={{ cursor: onStaffClick ? 'crosshair' : 'default' }}
       >
         <rect width={sheetWidth} height={height} fill="#fff" />
-        <g transform={`translate(0, ${offsetY})`}>{renderPianoStaff()}</g>
+        <g transform={`translate(0, ${offsetY})`}>
+          {renderStaffBackground()}
+          {renderTabSection()}
+          {renderNotes()}
+        </g>
       </svg>
 
       {editDisplay && editRef && anchorPoint && (

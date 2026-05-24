@@ -1,67 +1,19 @@
 import * as Tone from "tone";
+import {
+  INSTRUMENTS,
+  type InstrumentDefinition,
+  type PlaybackInstrumentId,
+} from "@/lib/music/instrument-registry";
 import { normalizePitchForTone } from "@/lib/music/pitch";
 
-export type PlaybackInstrumentId = "piano" | "guitar-acoustic";
-
-const SALAMANDER_BASE_URL = "https://tonejs.github.io/audio/salamander/";
-
-const SALAMANDER_URLS: Record<string, string> = {
-  A0: "A0.mp3",
-  C1: "C1.mp3",
-  "D#1": "Ds1.mp3",
-  "F#1": "Fs1.mp3",
-  A1: "A1.mp3",
-  C2: "C2.mp3",
-  "D#2": "Ds2.mp3",
-  "F#2": "Fs2.mp3",
-  A2: "A2.mp3",
-  C3: "C3.mp3",
-  "D#3": "Ds3.mp3",
-  "F#3": "Fs3.mp3",
-  A3: "A3.mp3",
-  C4: "C4.mp3",
-  "D#4": "Ds4.mp3",
-  "F#4": "Fs4.mp3",
-  A4: "A4.mp3",
-  C5: "C5.mp3",
-  "D#5": "Ds5.mp3",
-  "F#5": "Fs5.mp3",
-  A5: "A5.mp3",
-  C6: "C6.mp3",
-  "D#6": "Ds6.mp3",
-  "F#6": "Fs6.mp3",
-  A6: "A6.mp3",
-  C7: "C7.mp3",
-  "D#7": "Ds7.mp3",
-  "F#7": "Fs7.mp3",
-  A7: "A7.mp3",
-  C8: "C8.mp3",
-};
-
-const GUITAR_ACOUSTIC_BASE_URL =
-  "https://nbrosowsky.github.io/tonejs-instruments/samples/guitar-acoustic/";
-
-const GUITAR_ACOUSTIC_URLS: Record<string, string> = {
-  E2: "E2.mp3",
-  "F#2": "Fs2.mp3",
-  A2: "A2.mp3",
-  B2: "B2.mp3",
-  C3: "C3.mp3",
-  "D#3": "Ds3.mp3",
-  D3: "D3.mp3",
-  E3: "E3.mp3",
-  "F#3": "Fs3.mp3",
-  G3: "G3.mp3",
-  "A#3": "As3.mp3",
-  B3: "B3.mp3",
-  C4: "C4.mp3",
-  "D#4": "Ds4.mp3",
-  E4: "E4.mp3",
-  "F#4": "Fs4.mp3",
-  G4: "G4.mp3",
-  A4: "A4.mp3",
-  C5: "C5.mp3",
-};
+export type { PlaybackInstrumentId } from "@/lib/music/instrument-registry";
+export {
+  getInstrumentLabel,
+  getInstrumentOptions,
+  getNotationKind,
+  isPlaybackInstrumentId,
+  PLAYBACK_INSTRUMENT_IDS,
+} from "@/lib/music/instrument-registry";
 
 export interface PartitionInstrument {
   triggerAttackRelease(
@@ -74,15 +26,6 @@ export interface PartitionInstrument {
   triggerRelease(pitch: string, time?: number): void;
   releaseAll(): void;
   dispose(): void;
-}
-
-const INSTRUMENT_LABELS: Record<PlaybackInstrumentId, string> = {
-  piano: "piano",
-  "guitar-acoustic": "guitare",
-};
-
-export function getInstrumentLabel(id: PlaybackInstrumentId): string {
-  return INSTRUMENT_LABELS[id];
 }
 
 const cachedInstruments = new Map<PlaybackInstrumentId, PartitionInstrument>();
@@ -134,10 +77,10 @@ function wrapWithPitchNormalization(
   };
 }
 
-function createPianoFallback(): PartitionInstrument {
+function createFallback(def: InstrumentDefinition): PartitionInstrument {
   const synth = new Tone.PolySynth(Tone.Synth, {
     oscillator: { type: "triangle" },
-    envelope: { attack: 0.02, decay: 0.1, sustain: 0.3, release: 0.4 },
+    envelope: def.fallback,
   }).toDestination();
 
   const wrapped = wrapWithPitchNormalization(synth);
@@ -150,35 +93,16 @@ function createPianoFallback(): PartitionInstrument {
   };
 }
 
-function createGuitarFallback(): PartitionInstrument {
-  const synth = new Tone.PolySynth(Tone.Synth, {
-    oscillator: { type: "triangle" },
-    envelope: { attack: 0.001, decay: 0.35, sustain: 0.05, release: 0.6 },
-  }).toDestination();
-
-  const wrapped = wrapWithPitchNormalization(synth);
-
-  return {
-    ...wrapped,
-    dispose() {
-      synth.dispose();
-    },
-  };
-}
-
-async function loadSamplerWithReverb(
-  urls: Record<string, string>,
-  baseUrl: string,
-  reverbOptions: { decay: number; wet: number },
-  release: number,
+async function loadSamplerInstrument(
+  def: InstrumentDefinition,
 ): Promise<PartitionInstrument> {
-  const reverb = new Tone.Reverb(reverbOptions);
+  const reverb = new Tone.Reverb(def.sampler.reverb);
   await reverb.generate();
 
   const sampler = new Tone.Sampler({
-    urls,
-    baseUrl,
-    release,
+    urls: def.sampler.urls,
+    baseUrl: def.sampler.baseUrl,
+    release: def.sampler.release,
   });
   sampler.connect(reverb);
   reverb.toDestination();
@@ -196,30 +120,6 @@ async function loadSamplerWithReverb(
   };
 }
 
-async function loadPianoInstrument(): Promise<PartitionInstrument> {
-  return loadSamplerWithReverb(
-    SALAMANDER_URLS,
-    SALAMANDER_BASE_URL,
-    { decay: 2, wet: 0.25 },
-    1.2,
-  );
-}
-
-async function loadGuitarAcousticInstrument(): Promise<PartitionInstrument> {
-  return loadSamplerWithReverb(
-    GUITAR_ACOUSTIC_URLS,
-    GUITAR_ACOUSTIC_BASE_URL,
-    { decay: 1.5, wet: 0.15 },
-    0.8,
-  );
-}
-
-function getFallbackFor(id: PlaybackInstrumentId): PartitionInstrument {
-  return id === "guitar-acoustic"
-    ? createGuitarFallback()
-    : createPianoFallback();
-}
-
 function loadInstrument(id: PlaybackInstrumentId): Promise<PartitionInstrument> {
   const cached = cachedInstruments.get(id);
   if (cached) {
@@ -231,16 +131,14 @@ function loadInstrument(id: PlaybackInstrumentId): Promise<PartitionInstrument> 
     return pending;
   }
 
-  const loader =
-    id === "guitar-acoustic" ? loadGuitarAcousticInstrument : loadPianoInstrument;
-
-  const promise = loader()
+  const def = INSTRUMENTS[id];
+  const promise = loadSamplerInstrument(def)
     .then((instrument) => {
       cachedInstruments.set(id, instrument);
       return instrument;
     })
     .catch(() => {
-      const fallback = getFallbackFor(id);
+      const fallback = createFallback(def);
       cachedInstruments.set(id, fallback);
       return fallback;
     });

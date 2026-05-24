@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import type { CachedTrack } from '@/lib/sessionCache';
 import { SpeakerHigh, SpeakerSlash, Trash } from '@phosphor-icons/react';
 import {
-  getInstrumentLabel,
+  getInstrumentOptions,
   type PlaybackInstrumentId,
 } from '@/lib/music/partition-instruments';
 import {
@@ -23,7 +23,7 @@ const TRACK_LABEL_WIDTH = 140;
 const TRACK_HEIGHT = 64;
 const PIXELS_PER_SECOND = 80;
 const MEASURE_SECONDS = (60 / FIXED_BPM) * 4;
-const INSTRUMENT_OPTIONS: readonly PlaybackInstrumentId[] = ['piano', 'guitar-acoustic'];
+const INSTRUMENT_OPTIONS = getInstrumentOptions();
 
 interface AudioTimelineProps {
   tracks: CachedTrack[];
@@ -167,9 +167,9 @@ export function AudioTimeline({
                         </SelectTrigger>
                         <SelectContent className="bg-card border-border">
                           <SelectGroup>
-                            {INSTRUMENT_OPTIONS.map((id) => (
+                            {INSTRUMENT_OPTIONS.map(({ id, label }) => (
                               <SelectItem key={id} value={id} className="text-xs">
-                                {getInstrumentLabel(id)}
+                                {label}
                               </SelectItem>
                             ))}
                           </SelectGroup>

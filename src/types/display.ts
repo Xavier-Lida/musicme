@@ -1,3 +1,4 @@
+import type { PlaybackInstrumentId } from '@/lib/music/instrument-registry';
 import type { Note } from '@/types/transcription';
 
 export interface SelectedNoteRef {
@@ -11,4 +12,5 @@ export interface DisplayNote {
   trackId: string;
   indexInTrack: number;
   color: string;
+  instrument: PlaybackInstrumentId;
 }

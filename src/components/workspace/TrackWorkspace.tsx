@@ -139,6 +139,9 @@ export function TrackWorkspace({
               width={minWidthForNotes - 32}
               timelineDuration={timelineDuration}
               selectedNoteRef={selectedNoteRef}
+              activeTrackInstrument={
+                tracks.find((t) => t.id === activeTrackId)?.instrument ?? null
+              }
               onNoteSelect={onNoteSelect}
               onNotePitchChange={onNotePitchChange}
               onNoteUpdate={onNoteUpdate}

@@ -1,3 +1,5 @@
+import type { NotationKind } from '@/lib/music/instrument-registry';
+
 export const LINE_SPACING = 10;
 export const STAVE_LEFT = 10;
 export const CLEF_AREA_WIDTH = 72;
@@ -148,4 +150,188 @@ export function needsSharp(midi: number): boolean {
 export function stemUp(midi: number, clef: ClefKind): boolean {
   if (clef === 'treble') return midi >= 71;
   return midi >= 50;
+}
+
+export const SINGLE_STAVE_Y = TREBLE_STAVE_Y;
+export const TAB_SECTION_GAP = 16;
+
+export type SheetLayoutMode = 'grand-staff' | 'treble' | 'bass' | 'tab' | 'mixed';
+
+export interface SheetLayout {
+  mode: SheetLayoutMode;
+  offsetY: number;
+  height: number;
+  hasGrandStaff: boolean;
+  hasTab: boolean;
+  tabTop: number;
+}
+
+export function resolveSheetLayout(notationKinds: NotationKind[]): SheetLayoutMode {
+  const unique = [...new Set(notationKinds)];
+  const hasTab = unique.includes('tab');
+  const hasGrand = unique.includes('grand-staff');
+  const hasTreble = unique.includes('treble');
+  const hasBass = unique.includes('bass');
+
+  if (unique.length === 1) {
+    if (hasTab) return 'tab';
+    if (hasTreble) return 'treble';
+    if (hasBass) return 'bass';
+    return 'grand-staff';
+  }
+
+  if (hasTab && unique.length === 1) return 'tab';
+  if (hasGrand || (hasTreble && hasBass) || unique.length > 1) {
+    return hasTab ? 'mixed' : 'grand-staff';
+  }
+
+  return 'grand-staff';
+}
+
+export function buildSheetLayout(
+  items: { pitch: number; notationKind: NotationKind }[],
+): SheetLayout {
+  const notationKinds = items.map((i) => i.notationKind);
+  const mode = resolveSheetLayout(notationKinds);
+  const hasTab = notationKinds.includes('tab');
+  const hasGrandStaff =
+    mode === 'grand-staff' ||
+    mode === 'mixed' ||
+    (mode !== 'tab' && mode !== 'treble' && mode !== 'bass');
+
+  let tabTop = TAB_TOP;
+  let contentMin = Infinity;
+  let contentMax = -Infinity;
+
+  const noteYs: number[] = [];
+
+  for (const { pitch, notationKind: kind } of items) {
+    if (kind === 'tab') continue;
+    const y = pitchToNoteY(pitch, kind, mode);
+    noteYs.push(y);
+  }
+
+  if (mode === 'treble') {
+    contentMin = SINGLE_STAVE_Y - 4;
+    contentMax = SINGLE_STAVE_Y + 4 * LINE_SPACING + 4;
+  } else if (mode === 'bass') {
+    contentMin = SINGLE_STAVE_Y - 4;
+    contentMax = SINGLE_STAVE_Y + 4 * LINE_SPACING + 4;
+  } else if (mode === 'tab') {
+    contentMin = TAB_TOP - 4;
+    contentMax = TAB_TOP + 5 * LINE_SPACING + 4;
+  } else {
+    contentMin = TREBLE_STAVE_Y - 4;
+    contentMax = BASS_STAVE_Y + 4 * LINE_SPACING + 4;
+  }
+
+  if (noteYs.length) {
+    contentMin = Math.min(contentMin, ...noteYs.map((y) => y - NOTE_STEM_EXTENT));
+    contentMax = Math.max(contentMax, ...noteYs.map((y) => y + NOTE_STEM_EXTENT));
+  }
+
+  let height: number;
+  if (mode === 'tab') {
+    height = TAB_HEIGHT;
+    tabTop = TAB_TOP;
+  } else if (hasTab && hasGrandStaff) {
+    const grandHeight = contentMax - contentMin + GRAND_STAFF_VERTICAL_PADDING * 2;
+    tabTop = contentMax + TAB_SECTION_GAP + GRAND_STAFF_VERTICAL_PADDING;
+    const tabBottom = tabTop + 5 * LINE_SPACING + 24;
+    height = Math.max(GRAND_STAFF_HEIGHT + TAB_HEIGHT, tabBottom + GRAND_STAFF_VERTICAL_PADDING);
+  } else if (mode === 'treble' || mode === 'bass') {
+    height = Math.max(
+      SINGLE_STAVE_Y + 5 * LINE_SPACING + 24,
+      contentMax - contentMin + GRAND_STAFF_VERTICAL_PADDING * 2,
+    );
+  } else {
+    height = Math.max(
+      GRAND_STAFF_HEIGHT,
+      contentMax - contentMin + GRAND_STAFF_VERTICAL_PADDING * 2,
+    );
+  }
+
+  const padding = GRAND_STAFF_VERTICAL_PADDING;
+  const offsetY = contentMin < padding ? padding - contentMin : 0;
+
+  if (hasTab && hasGrandStaff) {
+    tabTop = contentMax + TAB_SECTION_GAP + padding;
+  }
+
+  return {
+    mode,
+    offsetY,
+    height,
+    hasGrandStaff,
+    hasTab,
+    tabTop,
+  };
+}
+
+export function pitchToNoteY(
+  pitch: number,
+  notationKind: NotationKind,
+  layoutMode: SheetLayoutMode,
+): number {
+  if (notationKind === 'tab') {
+    return TAB_TOP;
+  }
+
+  if (layoutMode === 'treble') {
+    return midiToY(pitch, SINGLE_STAVE_Y, 'treble');
+  }
+
+  if (layoutMode === 'bass') {
+    return midiToY(pitch, SINGLE_STAVE_Y, 'bass');
+  }
+
+  if (notationKind === 'bass') {
+    return midiToY(pitch, BASS_STAVE_Y, 'bass');
+  }
+
+  if (notationKind === 'treble') {
+    return midiToY(pitch, TREBLE_STAVE_Y, 'treble');
+  }
+
+  return pitchToGrandStaffY(pitch);
+}
+
+export function clefForNote(
+  pitch: number,
+  notationKind: NotationKind,
+  layoutMode: SheetLayoutMode,
+): ClefKind {
+  if (notationKind === 'treble' || layoutMode === 'treble') return 'treble';
+  if (notationKind === 'bass' || layoutMode === 'bass') return 'bass';
+  return splitNoteForPiano(pitch);
+}
+
+export function yToNotePitch(
+  y: number,
+  layout: SheetLayout,
+  notationKind?: NotationKind,
+  pitchMin = PIANO_PITCH_MIN,
+  pitchMax = PIANO_PITCH_MAX,
+): number {
+  if (layout.mode === 'tab' || notationKind === 'tab') {
+    return pitchMin;
+  }
+
+  if (layout.mode === 'treble') {
+    return yToMidiPitch(y, SINGLE_STAVE_Y, 'treble', pitchMin, pitchMax);
+  }
+
+  if (layout.mode === 'bass') {
+    return yToMidiPitch(y, SINGLE_STAVE_Y, 'bass', pitchMin, pitchMax);
+  }
+
+  if (notationKind === 'bass') {
+    return yToMidiPitch(y, BASS_STAVE_Y, 'bass', pitchMin, pitchMax);
+  }
+
+  if (notationKind === 'treble') {
+    return yToMidiPitch(y, TREBLE_STAVE_Y, 'treble', pitchMin, pitchMax);
+  }
+
+  return yToGrandStaffPitch(y, pitchMin, pitchMax);
 }
