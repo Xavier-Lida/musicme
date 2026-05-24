@@ -16,6 +16,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
 import { useAudioTracks, colorForTrackId } from '@/hooks/useAudioTracks';
 import { useMelodyPlayback } from '@/hooks/useMelodyPlayback';
+import { useNotesHistory } from '@/hooks/useNotesHistory';
 import { useProjectMetadata } from '@/hooks/useProjectMetadata';
 import {
   DEFAULT_CLEANUP_OPTIONS,
@@ -26,9 +27,11 @@ import {
 import { blobToWav } from '@/lib/audio';
 import {
   addNote,
+  changeNotePitch,
   findNoteAtSlot,
   removeNoteAt,
   sortNotesByStart,
+  updateNoteAt,
 } from '@/lib/music/note-editing';
 import type { PlaybackInstrumentId } from '@/lib/music/partition-instruments';
 import { exportPartitionToPdf } from '@/lib/pdf-export';
@@ -79,13 +82,23 @@ export default function Page() {
   const [cleanupOptions, setCleanupOptions] = useState<CleanupOptions>(DEFAULT_CLEANUP_OPTIONS);
   const [noteEditorOpen, setNoteEditorOpen] = useState(false);
   const sheetSvgRef = useRef<SVGSVGElement | null>(null);
+  const historyTrackIdRef = useRef<string | null>(null);
+
+  const {
+    notes: historyNotes,
+    setNotes: pushNotesHistory,
+    resetHistory,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+  } = useNotesHistory([]);
 
   const activeTrack = useMemo(
     () => tracks.find((t) => t.id === activeTrackId) ?? null,
     [tracks, activeTrackId],
   );
 
-  // Auto-select the first track when active track is missing.
   useEffect(() => {
     if (tracks.length === 0) {
       if (activeTrackId !== null) setActiveTrackId(null);
@@ -95,6 +108,18 @@ export default function Page() {
       setActiveTrackId(tracks[0].id);
     }
   }, [tracks, activeTrackId]);
+
+  useEffect(() => {
+    if (!activeTrackId) {
+      historyTrackIdRef.current = null;
+      resetHistory([]);
+      return;
+    }
+    if (historyTrackIdRef.current === activeTrackId) return;
+    historyTrackIdRef.current = activeTrackId;
+    const track = tracks.find((t) => t.id === activeTrackId);
+    resetHistory(track?.notes ?? []);
+  }, [activeTrackId, tracks, resetHistory]);
 
   const displayNotes = useMemo(() => buildDisplayNotes(tracks), [tracks]);
 
@@ -134,6 +159,35 @@ export default function Page() {
     });
   }, [cleanupOptions]);
 
+  const persistTrackNotes = useCallback(
+    async (trackId: string, notes: Note[]) => {
+      await persistTracks((ts) =>
+        ts.map((t) => (t.id === trackId ? { ...t, notes } : t)),
+      );
+    },
+    [persistTracks],
+  );
+
+  const commitTrackNotes = useCallback(
+    (trackId: string, notes: Note[], recordHistory = true) => {
+      const sorted = sortNotesByStart(notes);
+      setTrackNotes(trackId, sorted);
+      persistTrackNotes(trackId, sorted);
+      if (trackId === activeTrackId) {
+        pushNotesHistory(sorted, { recordHistory });
+      }
+    },
+    [activeTrackId, setTrackNotes, persistTrackNotes, pushNotesHistory],
+  );
+
+  useEffect(() => {
+    if (!activeTrackId || historyTrackIdRef.current !== activeTrackId) return;
+    const track = tracks.find((t) => t.id === activeTrackId);
+    if (!track || JSON.stringify(track.notes) === JSON.stringify(historyNotes)) return;
+    setTrackNotes(activeTrackId, historyNotes);
+    persistTrackNotes(activeTrackId, historyNotes);
+  }, [historyNotes, activeTrackId, tracks, setTrackNotes, persistTrackNotes]);
+
   const handleTrackInstrumentChange = useCallback(
     async (trackId: string, id: PlaybackInstrumentId) => {
       pausePlaybackRef.current();
@@ -145,25 +199,15 @@ export default function Page() {
     [setTrackInstrument, persistTracks],
   );
 
-  const persistTrackNotes = useCallback(
-    async (trackId: string, notes: Note[]) => {
-      await persistTracks((ts) =>
-        ts.map((t) => (t.id === trackId ? { ...t, notes } : t)),
-      );
-    },
-    [persistTracks],
-  );
-
   const handleRemoveNote = useCallback(
     (trackId: string, indexInTrack: number) => {
       const track = tracks.find((t) => t.id === trackId);
       if (!track) return;
       const { notes: updated } = removeNoteAt(track.notes, indexInTrack);
-      setTrackNotes(trackId, updated);
+      commitTrackNotes(trackId, updated);
       setSelectedNoteRef(null);
-      persistTrackNotes(trackId, updated);
     },
-    [tracks, setTrackNotes, persistTrackNotes],
+    [tracks, commitTrackNotes],
   );
 
   const handleAddNoteToTrack = useCallback(
@@ -175,11 +219,10 @@ export default function Page() {
         start,
         duration,
       });
-      setTrackNotes(trackId, updated);
+      commitTrackNotes(trackId, updated);
       setSelectedNoteRef({ trackId, indexInTrack: selectedIndex });
-      persistTrackNotes(trackId, updated);
     },
-    [tracks, setTrackNotes, persistTrackNotes],
+    [tracks, commitTrackNotes],
   );
 
   const handleAddNoteToActiveTrack = useCallback(
@@ -214,22 +257,55 @@ export default function Page() {
     (trackId: string, indexInTrack: number, newPitch: number) => {
       const track = tracks.find((t) => t.id === trackId);
       if (!track) return;
-      const updated = track.notes.map((n, i) =>
-        i === indexInTrack ? { ...n, pitch: newPitch } : n,
+      const { notes: updated, selectedIndex } = changeNotePitch(
+        track.notes,
+        indexInTrack,
+        newPitch,
       );
-      setTrackNotes(trackId, updated);
-      persistTrackNotes(trackId, updated);
+      commitTrackNotes(trackId, updated);
+      if (selectedIndex !== null) {
+        setSelectedNoteRef({ trackId, indexInTrack: selectedIndex });
+      }
     },
-    [tracks, setTrackNotes, persistTrackNotes],
+    [tracks, commitTrackNotes],
   );
+
+  const handleNoteUpdate = useCallback(
+    (
+      trackId: string,
+      indexInTrack: number,
+      patch: { pitch?: number; end?: number },
+    ) => {
+      const track = tracks.find((t) => t.id === trackId);
+      if (!track) return;
+      const { notes: updated, selectedIndex } = updateNoteAt(
+        track.notes,
+        indexInTrack,
+        patch,
+      );
+      commitTrackNotes(trackId, updated);
+      if (selectedIndex !== null) {
+        setSelectedNoteRef({ trackId, indexInTrack: selectedIndex });
+      }
+    },
+    [tracks, commitTrackNotes],
+  );
+
+  const handleUndo = useCallback(() => {
+    undo();
+  }, [undo]);
+
+  const handleRedo = useCallback(() => {
+    redo();
+  }, [redo]);
 
   const handleResetNotes = useCallback(() => {
     if (!activeTrack) return;
     const sorted = sortNotesByStart(activeTrack.rawNotes);
-    setTrackNotes(activeTrack.id, sorted);
+    commitTrackNotes(activeTrack.id, sorted, false);
+    resetHistory(sorted);
     setSelectedNoteRef(null);
-    persistTrackNotes(activeTrack.id, sorted);
-  }, [activeTrack, setTrackNotes, persistTrackNotes]);
+  }, [activeTrack, commitTrackNotes, resetHistory]);
 
   const processTranscription = useCallback(
     async (wav: Blob, name: string) => {
@@ -251,6 +327,8 @@ export default function Page() {
         });
 
         setActiveTrackId(newTrack.id);
+        historyTrackIdRef.current = newTrack.id;
+        resetHistory(sortedNotes);
         setSelectedNoteRef(null);
 
         const cached = await sessionCache.load();
@@ -270,7 +348,7 @@ export default function Page() {
         setBusy(false);
       }
     },
-    [cleanupOptions, addTrack],
+    [cleanupOptions, addTrack, resetHistory],
   );
 
   useEffect(() => {
@@ -282,7 +360,6 @@ export default function Page() {
         if (cancelled || !cached) return;
 
         if (cached.tracks && cached.tracks.length > 0) {
-          // Backfill missing fields for older cached entries.
           const migrated: CachedTrack[] = cached.tracks.map((t) => ({
             ...t,
             notes: t.notes ?? cached.cleanedNotes ?? [],
@@ -293,8 +370,9 @@ export default function Page() {
           }));
           setTracks(migrated);
           setActiveTrackId(migrated[0].id);
+          historyTrackIdRef.current = migrated[0].id;
+          resetHistory(migrated[0].notes ?? []);
         } else if (cached.audio) {
-          // Legacy single-audio session: rebuild as one track.
           await addTrack({
             blob: cached.audio,
             name: 'Piste Audio',
@@ -317,13 +395,26 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, [setTracks, addTrack]);
+  }, [setTracks, addTrack, resetHistory]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (noteEditorOpen) return;
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+      if (mod && (e.key === 'Z' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNoteRef) {
         e.preventDefault();
         handleRemoveNote(selectedNoteRef.trackId, selectedNoteRef.indexInTrack);
@@ -331,7 +422,7 @@ export default function Page() {
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedNoteRef, handleRemoveNote, noteEditorOpen]);
+  }, [selectedNoteRef, handleRemoveNote, noteEditorOpen, handleUndo, handleRedo]);
 
   useEffect(() => {
     if (error) {
@@ -385,7 +476,8 @@ export default function Page() {
       try {
         const { notes: cleaned } = await recleanupNotes(activeTrack.rawNotes, nextOptions);
         const sortedNotes = sortNotesByStart(cleaned);
-        setTrackNotes(activeTrack.id, sortedNotes);
+        commitTrackNotes(activeTrack.id, sortedNotes, false);
+        resetHistory(sortedNotes);
         setCleanupOptions(nextOptions);
         setSelectedNoteRef(null);
 
@@ -402,21 +494,23 @@ export default function Page() {
         setBusy(false);
       }
     },
-    [activePreset, activeTrack, cleanupOptions, setTrackNotes, persistTracks],
+    [activePreset, activeTrack, cleanupOptions, commitTrackNotes, resetHistory, persistTracks],
   );
 
   const handleClearNotes = useCallback(async () => {
     if (!activeTrack) return;
     playback.stop();
-    setTrackNotes(activeTrack.id, []);
+    commitTrackNotes(activeTrack.id, [], false);
+    resetHistory([]);
     setSelectedNoteRef(null);
-    persistTrackNotes(activeTrack.id, []);
-  }, [activeTrack, playback, setTrackNotes, persistTrackNotes]);
+  }, [activeTrack, playback, commitTrackNotes, resetHistory]);
 
   async function handleClearSession() {
     playback.stop();
     await sessionCache.clear();
     clearTracks();
+    resetHistory([]);
+    historyTrackIdRef.current = null;
     setCleanupOptions(DEFAULT_CLEANUP_OPTIONS);
     setActiveTrackId(null);
     setSelectedNoteRef(null);
@@ -506,6 +600,12 @@ export default function Page() {
         hasRecording={tracks.length > 0}
         onNoteSelect={handleNoteSelect}
         onNotePitchChange={handleNotePitchChange}
+        onNoteUpdate={handleNoteUpdate}
+        onNoteRemove={handleRemoveNote}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
         onStaffClick={handleStaffClick}
         onSeek={playback.seek}
         onStartRecording={start}

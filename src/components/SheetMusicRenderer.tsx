@@ -1,294 +1,243 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { InteractiveNote } from '@/components/sheet/InteractiveNote';
+import { NoteEditPopover } from '@/components/sheet/NoteEditPopover';
+import { StaffLines, TimeSignature } from '@/components/sheet/StaffLines';
+import { BassClef, GrandStaffBrace, TrebleClef } from '@/components/sheet/clefs';
+import { staffClickToStart } from '@/lib/music/note-editing';
 import {
-  Renderer,
-  Stave,
-  StaveNote,
-  StaveTie,
-  Voice,
-  Formatter,
-  Accidental,
-} from 'vexflow';
-import type { Note } from '@/types/transcription';
-import { SIXTEENTH_SECONDS } from '@/types/transcription';
-import {
-  STAVE_LEFT,
-  STAVE_Y,
-  staffClickToStart,
-  yToMidiPitch,
-} from '@/lib/music/note-editing';
-import { secondsToVexDuration } from '@/lib/music/vexflow-layout';
+  BASS_STAVE_Y,
+  NOTE_AREA_LEFT,
+  TREBLE_STAVE_Y,
+  computeGrandStaffLayout,
+  computeSheetWidth,
+  pitchToGrandStaffY,
+  splitNoteForPiano,
+  timeToX,
+  yToGrandStaffPitch,
+} from '@/lib/music/staff-geometry';
 import type { DisplayNote, SelectedNoteRef } from '@/types/display';
 
 interface Props {
   displayNotes: DisplayNote[];
   width?: number;
-  height?: number;
   timelineDuration: number;
   selectedNoteRef?: SelectedNoteRef | null;
   onNoteSelect?: (trackId: string, indexInTrack: number) => void;
   onNotePitchChange?: (trackId: string, indexInTrack: number, newPitch: number) => void;
+  onNoteUpdate?: (
+    trackId: string,
+    indexInTrack: number,
+    patch: { pitch?: number; end?: number },
+  ) => void;
+  onNoteRemove?: (trackId: string, indexInTrack: number) => void;
   onStaffClick?: (pitch: number, start: number) => void;
   onSvgReady?: (svg: SVGSVGElement | null) => void;
 }
 
-const SHARP_PITCH_NAMES = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
-
-function midiToVexKey(midi: number): { key: string; needsAccidental: boolean } {
-  const name = SHARP_PITCH_NAMES[midi % 12];
-  const octave = Math.floor(midi / 12) - 1;
-  return { key: `${name}/${octave}`, needsAccidental: name.includes('#') };
+function noteKey(d: DisplayNote): string {
+  return `${d.trackId}-${d.indexInTrack}`;
 }
 
-// Build a flat list of {kind: 'note'|'rest', ...} where rests fill gaps between
-// merged notes so VexFlow spacing reflects timing across all tracks at once.
-interface MergedSpec {
-  kind: 'note' | 'rest';
-  durationSec: number;
-  displayIndex?: number;
-  display?: DisplayNote;
-}
-
-function buildMergedSpecs(displayNotes: DisplayNote[]): MergedSpec[] {
-  if (displayNotes.length === 0) return [];
-  const specs: MergedSpec[] = [];
-  let cursor = 0;
-  const minGap = SIXTEENTH_SECONDS / 2;
-
-  for (let i = 0; i < displayNotes.length; i++) {
-    const d = displayNotes[i];
-    const gap = d.note.start - cursor;
-    if (gap > minGap) {
-      specs.push({ kind: 'rest', durationSec: gap });
-    }
-    specs.push({
-      kind: 'note',
-      durationSec: Math.max(d.note.end - d.note.start, SIXTEENTH_SECONDS),
-      displayIndex: i,
-      display: d,
-    });
-    cursor = Math.max(cursor, d.note.end);
-  }
-  return specs;
+function clientYToSvgY(svg: SVGSVGElement, clientY: number): number {
+  const pt = svg.createSVGPoint();
+  pt.x = 0;
+  pt.y = clientY;
+  const ctm = svg.getScreenCTM();
+  if (!ctm) return clientY;
+  return pt.matrixTransform(ctm.inverse()).y;
 }
 
 export default function SheetMusicRenderer({
   displayNotes,
   width = 800,
-  height = 220,
   timelineDuration,
   selectedNoteRef = null,
   onNoteSelect,
   onNotePitchChange,
+  onNoteUpdate,
+  onNoteRemove,
   onStaffClick,
   onSvgReady,
 }: Props) {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const onNoteSelectRef = useRef(onNoteSelect);
-  const onNotePitchChangeRef = useRef(onNotePitchChange);
-  const onStaffClickRef = useRef(onStaffClick);
-  const onSvgReadyRef = useRef(onSvgReady);
-  const timelineDurationRef = useRef(timelineDuration);
-  const noteAreaRef = useRef({ left: 0, width: 0 });
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [editRef, setEditRef] = useState<SelectedNoteRef | null>(null);
+  const [anchorPoint, setAnchorPoint] = useState<{ x: number; y: number } | null>(null);
+  const [previewPitches, setPreviewPitches] = useState<Record<string, number>>({});
 
-  onNoteSelectRef.current = onNoteSelect;
-  onNotePitchChangeRef.current = onNotePitchChange;
-  onStaffClickRef.current = onStaffClick;
-  onSvgReadyRef.current = onSvgReady;
-  timelineDurationRef.current = timelineDuration;
+  const sheetWidth = computeSheetWidth(width, timelineDuration);
 
-  const staveWidth = width - 20;
+  const displayedPitches = useMemo(
+    () =>
+      displayNotes.map((d) => previewPitches[noteKey(d)] ?? d.note.pitch),
+    [displayNotes, previewPitches],
+  );
+
+  const { offsetY, height } = useMemo(
+    () => computeGrandStaffLayout(displayedPitches),
+    [displayedPitches],
+  );
 
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
+    onSvgReady?.(svgRef.current);
+    return () => onSvgReady?.(null);
+  }, [onSvgReady, displayNotes, sheetWidth, height, offsetY, selectedNoteRef, timelineDuration]);
 
-    host.innerHTML = '';
+  const closePopover = useCallback(() => {
+    setEditRef(null);
+    setAnchorPoint(null);
+  }, []);
 
-    const renderer = new Renderer(host, Renderer.Backends.SVG);
-    renderer.resize(width, height);
-    const ctx = renderer.getContext();
-    const svg = host.querySelector('svg') as SVGSVGElement | null;
-    onSvgReadyRef.current?.(svg);
+  const yToPitchAtOffset = useCallback(
+    (svgY: number) => yToGrandStaffPitch(svgY - offsetY),
+    [offsetY],
+  );
 
-    const stave = new Stave(STAVE_LEFT, STAVE_Y, staveWidth);
-    stave.addClef('treble').addTimeSignature('4/4');
-    stave.setContext(ctx).draw();
+  const handleStaffBackgroundClick = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      if ((e.target as Element).closest('.sheet-note')) return;
+      if (!onStaffClick || !svgRef.current) return;
 
-    const noteStartX = stave.getNoteStartX();
-    const noteAreaLeft = noteStartX - STAVE_LEFT;
-    const noteAreaWidth = Math.max(1, staveWidth - noteAreaLeft);
-    noteAreaRef.current = { left: noteAreaLeft, width: noteAreaWidth };
+      const svg = svgRef.current;
+      const rect = svg.getBoundingClientRect();
+      const scrollParent = svg.closest('.daw-sheet-inner');
+      const scrollLeft = scrollParent?.scrollLeft ?? 0;
+      const x = e.clientX - rect.left + scrollLeft;
+      const y = e.clientY - rect.top;
+      const start = staffClickToStart(x, timelineDuration);
+      const pitch = yToPitchAtOffset(y);
+      onStaffClick(pitch, start);
+    },
+    [onStaffClick, timelineDuration, yToPitchAtOffset],
+  );
 
-    const cleanups: Array<() => void> = [];
-
-    if (displayNotes.length > 0) {
-      const specs = buildMergedSpecs(displayNotes);
-      const staveNotes: StaveNote[] = [];
-      // Map each stave-note index back to its DisplayNote (or null for rests)
-      const specMeta: Array<{ display: DisplayNote | null }> = [];
-
-      for (const spec of specs) {
-        if (spec.kind === 'rest') {
-          const dur = `${secondsToVexDuration(spec.durationSec)}r`;
-          staveNotes.push(
-            new StaveNote({ keys: ['b/4'], duration: dur, type: 'r' }),
-          );
-          specMeta.push({ display: null });
-          continue;
-        }
-
-        const display = spec.display!;
-        const { key, needsAccidental } = midiToVexKey(display.note.pitch);
-        const duration = secondsToVexDuration(spec.durationSec);
-        const sn = new StaveNote({ keys: [key], duration });
-        if (needsAccidental) sn.addModifier(new Accidental('#'), 0);
-
-        const isSelected =
-          selectedNoteRef?.trackId === display.trackId &&
-          selectedNoteRef.indexInTrack === display.indexInTrack;
-
-        sn.setStyle({
-          fillStyle: isSelected ? '#0b3aa8' : display.color,
-          strokeStyle: isSelected ? '#0b3aa8' : display.color,
-        });
-        staveNotes.push(sn);
-        specMeta.push({ display });
-      }
-
-      try {
-        const voice = new Voice({ num_beats: staveNotes.length, beat_value: 4 }).setStrict(false);
-        voice.addTickables(staveNotes);
-        new Formatter().joinVoices([voice]).format([voice], staveWidth - 80);
-        voice.draw(ctx, stave);
-
-        // Ties for tied_to_next within a single track (consecutive same-track notes)
-        for (let i = 0; i < specs.length; i++) {
-          const meta = specMeta[i];
-          if (!meta.display || !meta.display.note.tied_to_next) continue;
-          // Find next stave note belonging to the same track
-          let nextIdx = -1;
-          for (let j = i + 1; j < specMeta.length; j++) {
-            if (specMeta[j].display?.trackId === meta.display.trackId) {
-              nextIdx = j;
-              break;
-            }
-          }
-          if (nextIdx < 0) continue;
-          const tie = new StaveTie({
-            first_note: staveNotes[i],
-            last_note: staveNotes[nextIdx],
-            first_indices: [0],
-            last_indices: [0],
-          });
-          tie.setContext(ctx).draw();
-        }
-
-        // Wire click + drag interactions per note
-        staveNotes.forEach((sn, idx) => {
-          const meta = specMeta[idx];
-          if (!meta.display) return;
-          const el = sn.getSVGElement?.();
-          if (!el) return;
-          el.style.cursor = 'grab';
-
-          const display = meta.display;
-          let dragState: {
-            startY: number;
-            startPitch: number;
-            currentPitch: number;
-            moved: boolean;
-          } | null = null;
-
-          const onMouseDown = (e: MouseEvent) => {
-            e.stopPropagation();
-            dragState = {
-              startY: e.clientY,
-              startPitch: display.note.pitch,
-              currentPitch: display.note.pitch,
-              moved: false,
-            };
-            el.style.cursor = 'grabbing';
-
-            const onMove = (ev: MouseEvent) => {
-              if (!dragState) return;
-              // One semitone per 5px of vertical drag (drag UP raises pitch).
-              const dy = ev.clientY - dragState.startY;
-              const semitones = Math.round(-dy / 5);
-              const newPitch = Math.max(36, Math.min(96, dragState.startPitch + semitones));
-              if (Math.abs(dy) > 3) dragState.moved = true;
-              if (newPitch !== dragState.currentPitch) {
-                dragState.currentPitch = newPitch;
-              }
-            };
-
-            const onUp = () => {
-              window.removeEventListener('mousemove', onMove);
-              window.removeEventListener('mouseup', onUp);
-              el.style.cursor = 'grab';
-              if (!dragState) return;
-              const ds = dragState;
-              dragState = null;
-              if (!ds.moved) {
-                // Treat as click: select the note
-                onNoteSelectRef.current?.(display.trackId, display.indexInTrack);
-                return;
-              }
-              if (ds.currentPitch !== ds.startPitch) {
-                onNotePitchChangeRef.current?.(
-                  display.trackId,
-                  display.indexInTrack,
-                  ds.currentPitch,
-                );
-              }
-            };
-
-            window.addEventListener('mousemove', onMove);
-            window.addEventListener('mouseup', onUp);
-          };
-
-          el.addEventListener('mousedown', onMouseDown);
-          cleanups.push(() => el.removeEventListener('mousedown', onMouseDown));
-        });
-      } catch (err) {
-        ctx.setFont('sans-serif', 12).fillText(
-          `Render error: ${(err as Error).message}`,
-          30,
-          100,
-        );
-      }
-    }
-
-    if (svg && onStaffClickRef.current) {
-      svg.style.cursor = 'crosshair';
-      const staffHandler = (e: MouseEvent) => {
-        const target = e.target as Element;
-        if (target.closest('.vf-stavenote')) return;
-        const rect = svg.getBoundingClientRect();
-        const scrollParent = host.closest('.daw-sheet-inner');
-        const scrollLeft = scrollParent?.scrollLeft ?? 0;
-        const y = e.clientY - rect.top;
-        const xOnStave = e.clientX - rect.left + scrollLeft - STAVE_LEFT;
-        const pitch = yToMidiPitch(y, STAVE_Y);
-        const { left, width: areaWidth } = noteAreaRef.current;
-        const start = staffClickToStart(
-          xOnStave,
-          left,
-          areaWidth,
-          timelineDurationRef.current,
-        );
-        onStaffClickRef.current?.(pitch, start);
+  const makeYToPitch = useCallback(
+    (svg: SVGSVGElement) => {
+      return (clientY: number) => {
+        const y = clientYToSvgY(svg, clientY);
+        return yToPitchAtOffset(y);
       };
-      svg.addEventListener('click', staffHandler);
-      cleanups.push(() => svg.removeEventListener('click', staffHandler));
-    }
+    },
+    [yToPitchAtOffset],
+  );
 
-    return () => {
-      for (const cleanup of cleanups) cleanup();
-      onSvgReadyRef.current?.(null);
-    };
-  }, [displayNotes, width, height, selectedNoteRef, staveWidth]);
+  function openEditPopover(
+    ref: SelectedNoteRef,
+    clientX: number,
+    clientY: number,
+  ) {
+    onNoteSelect?.(ref.trackId, ref.indexInTrack);
+    setEditRef(ref);
+    setAnchorPoint({ x: clientX, y: clientY });
+  }
 
-  return <div ref={hostRef} aria-label="Sheet music" className="sheet-renderer" />;
+  function renderPianoStaff() {
+    const staffWidth = sheetWidth - NOTE_AREA_LEFT;
+
+    return (
+      <>
+        <GrandStaffBrace
+          x={NOTE_AREA_LEFT - 8}
+          y={TREBLE_STAVE_Y - 4}
+          height={BASS_STAVE_Y - TREBLE_STAVE_Y + 44}
+        />
+        <StaffLines staveTop={TREBLE_STAVE_Y} width={staffWidth} x={NOTE_AREA_LEFT} />
+        <StaffLines staveTop={BASS_STAVE_Y} width={staffWidth} x={NOTE_AREA_LEFT} />
+        <TrebleClef y={TREBLE_STAVE_Y + 32} />
+        <BassClef y={BASS_STAVE_Y + 28} />
+        <TimeSignature x={52} staveTop={TREBLE_STAVE_Y} />
+        <TimeSignature x={52} staveTop={BASS_STAVE_Y} />
+
+        {displayNotes.map((d) => {
+          const key = noteKey(d);
+          const pitch = previewPitches[key] ?? d.note.pitch;
+          const clef = splitNoteForPiano(pitch);
+          const x = timeToX(d.note.start);
+          const y = pitchToGrandStaffY(pitch);
+          const svg = svgRef.current;
+          if (!svg) return null;
+
+          const selected =
+            selectedNoteRef?.trackId === d.trackId &&
+            selectedNoteRef.indexInTrack === d.indexInTrack;
+
+          return (
+            <InteractiveNote
+              key={`${key}-${d.note.start}-${d.note.pitch}`}
+              x={x}
+              y={y}
+              pitch={pitch}
+              clef={clef}
+              selected={selected}
+              noteColor={d.color}
+              yToPitch={makeYToPitch(svg)}
+              onPitchPreview={(p) =>
+                setPreviewPitches((prev) => ({ ...prev, [key]: p }))
+              }
+              onPitchCommit={(p) => {
+                setPreviewPitches((prev) => {
+                  const next = { ...prev };
+                  delete next[key];
+                  return next;
+                });
+                onNotePitchChange?.(d.trackId, d.indexInTrack, p);
+              }}
+              onEditRequest={(clientX, clientY) =>
+                openEditPopover(
+                  { trackId: d.trackId, indexInTrack: d.indexInTrack },
+                  clientX,
+                  clientY,
+                )
+              }
+            />
+          );
+        })}
+      </>
+    );
+  }
+
+  const editDisplay =
+    editRef !== null
+      ? displayNotes.find(
+          (d) =>
+            d.trackId === editRef.trackId && d.indexInTrack === editRef.indexInTrack,
+        )
+      : null;
+
+  return (
+    <>
+      <svg
+        ref={svgRef}
+        width={sheetWidth}
+        height={height}
+        className="sheet-renderer-svg"
+        aria-label="Partition"
+        onClick={handleStaffBackgroundClick}
+        style={{ cursor: onStaffClick ? 'crosshair' : 'default' }}
+      >
+        <rect width={sheetWidth} height={height} fill="#fff" />
+        <g transform={`translate(0, ${offsetY})`}>{renderPianoStaff()}</g>
+      </svg>
+
+      {editDisplay && editRef && anchorPoint && (
+        <NoteEditPopover
+          note={editDisplay.note}
+          open
+          onOpenChange={(open) => {
+            if (!open) closePopover();
+          }}
+          anchorPoint={anchorPoint}
+          onApply={(patch) => {
+            onNoteUpdate?.(editRef.trackId, editRef.indexInTrack, patch);
+            closePopover();
+          }}
+          onRemove={() => {
+            onNoteRemove?.(editRef.trackId, editRef.indexInTrack);
+            closePopover();
+          }}
+        />
+      )}
+    </>
+  );
 }

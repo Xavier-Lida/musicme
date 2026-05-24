@@ -66,8 +66,19 @@
 }
 
 /* ─── Sheet renderer ───────────────────────────────────── */
-.sheet-renderer svg {
+.sheet-renderer svg,
+.sheet-renderer-svg {
   display: block;
+}
+
+.sheet-toolbar {
+  padding-left: 4px;
+}
+
+.sheet-note--selected ellipse,
+.sheet-note--selected line,
+.sheet-note--selected text {
+  filter: drop-shadow(0 0 2px rgba(91, 141, 239, 0.5));
 }
 
 /* ─── App shell ────────────────────────────────────────── */
@@ -387,7 +398,7 @@
   background: #fff;
   border-radius: 5px;
   overflow: hidden;
-  min-height: 140px;
+  min-height: 160px;
 }
 
 /* DAW track section */

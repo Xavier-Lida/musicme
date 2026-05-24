@@ -1,8 +1,20 @@
 import type { Note } from '@/types/transcription';
 import { FIXED_BPM, SIXTEENTH_SECONDS } from '@/types/transcription';
+import {
+  NOTE_AREA_LEFT,
+  PIXELS_PER_SECOND,
+  STAVE_LEFT,
+  STAVE_Y,
+  TREBLE_STAVE_Y,
+  yToMidiPitch as yToMidiPitchOnStaff,
+} from '@/lib/music/staff-geometry';
 
-export const STAVE_LEFT = 10;
-export const STAVE_Y = 40;
+export { STAVE_LEFT, STAVE_Y, TREBLE_STAVE_Y };
+
+/** Treble-clef pitch from Y (backward-compatible wrapper). */
+export function yToMidiPitch(y: number, staveTop = TREBLE_STAVE_Y): number {
+  return yToMidiPitchOnStaff(y, staveTop, 'treble');
+}
 
 export function quantizeToSixteenth(seconds: number): number {
   return Math.round(seconds / SIXTEENTH_SECONDS) * SIXTEENTH_SECONDS;
@@ -76,18 +88,40 @@ export function computeTimelineSpan(audioDuration: number, notes: Note[]): numbe
   return Math.max(audioDuration, lastEnd, fourMeasures);
 }
 
-export function staffClickToStart(
-  xOnStave: number,
-  noteAreaLeft: number,
-  noteAreaWidth: number,
-  timelineDuration: number,
-): number {
-  if (noteAreaWidth <= 0) return 0;
-  const ratio = Math.max(
-    0,
-    Math.min(1, (xOnStave - noteAreaLeft) / noteAreaWidth),
-  );
-  return quantizeToSixteenth(ratio * timelineDuration);
+export function staffClickToStart(x: number, timelineDuration: number): number {
+  const noteX = x - NOTE_AREA_LEFT;
+  const seconds = Math.max(0, Math.min(timelineDuration, noteX / PIXELS_PER_SECOND));
+  return quantizeToSixteenth(seconds);
+}
+
+export function updateNoteAt(
+  notes: Note[],
+  index: number,
+  patch: Partial<Pick<Note, 'pitch' | 'start' | 'end' | 'velocity' | 'tied_to_next'>>,
+): { notes: Note[]; selectedIndex: number } {
+  if (index < 0 || index >= notes.length) {
+    return { notes, selectedIndex: index };
+  }
+  const current = notes[index];
+  const duration = current.end - current.start;
+  const nextNote: Note = {
+    ...current,
+    ...patch,
+  };
+  if (patch.start !== undefined && patch.end === undefined) {
+    nextNote.end = patch.start + duration;
+  }
+  const updated = notes.map((n, i) => (i === index ? nextNote : n));
+  const sorted = sortNotesByStart(updated);
+  return { notes: sorted, selectedIndex: sorted.indexOf(nextNote) };
+}
+
+export function changeNotePitch(
+  notes: Note[],
+  index: number,
+  pitch: number,
+): { notes: Note[]; selectedIndex: number } {
+  return updateNoteAt(notes, index, { pitch });
 }
 
 export function findNoteAtSlot(
@@ -102,11 +136,3 @@ export function findNoteAtSlot(
   return index >= 0 ? index : null;
 }
 
-/** Approximate treble-clef MIDI pitch from a click Y coordinate on the SVG. */
-export function yToMidiPitch(y: number, staveTop = STAVE_Y): number {
-  const lineSpacing = 10;
-  const middleLineY = staveTop + lineSpacing * 2;
-  const halfStepsFromMiddle = (middleLineY - y) / (lineSpacing / 2);
-  const midi = Math.round(71 + halfStepsFromMiddle);
-  return Math.max(48, Math.min(84, midi));
-}

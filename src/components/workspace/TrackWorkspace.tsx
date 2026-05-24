@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
 import { AudioTimeline } from '@/components/timeline/AudioTimeline';
 import { ActionToolbar } from '@/components/workspace/ActionToolbar';
+import { SheetToolbar } from '@/components/sheet/SheetToolbar';
 import type { PlaybackInstrumentId } from '@/lib/music/partition-instruments';
 import type { CleanupPreset } from '@/types/transcription';
 import { cn } from '@/lib/utils';
@@ -34,6 +35,16 @@ interface TrackWorkspaceProps {
   hasRecording: boolean;
   onNoteSelect: (trackId: string, indexInTrack: number) => void;
   onNotePitchChange: (trackId: string, indexInTrack: number, newPitch: number) => void;
+  onNoteUpdate?: (
+    trackId: string,
+    indexInTrack: number,
+    patch: { pitch?: number; end?: number },
+  ) => void;
+  onNoteRemove?: (trackId: string, indexInTrack: number) => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
   timelineDuration: number;
   onStaffClick?: (pitch: number, start: number) => void;
   onSeek: (seconds: number) => void;
@@ -71,6 +82,12 @@ export function TrackWorkspace({
   hasResult,
   onNoteSelect,
   onNotePitchChange,
+  onNoteUpdate,
+  onNoteRemove,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
   timelineDuration,
   onStaffClick,
   onSeek,
@@ -104,13 +121,18 @@ export function TrackWorkspace({
   }, []);
 
   const notesCount = displayNotes.length;
-  // Make partition grow with note count so users can horizontally scroll long pieces.
   const minWidthForNotes = Math.max(sheetWidth, notesCount * 36 + 160);
 
   return (
     <div className={cn('flex flex-col flex-1 h-full overflow-hidden', className)}>
       <div ref={sheetContainerRef} className="daw-sheet-section">
         <div className="daw-sheet-inner">
+          <SheetToolbar
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={onUndo ?? (() => {})}
+            onRedo={onRedo ?? (() => {})}
+          />
           <div className="daw-sheet-frame p-4" style={{ width: minWidthForNotes }}>
             <SheetMusicRenderer
               displayNotes={displayNotes}
@@ -119,6 +141,8 @@ export function TrackWorkspace({
               selectedNoteRef={selectedNoteRef}
               onNoteSelect={onNoteSelect}
               onNotePitchChange={onNotePitchChange}
+              onNoteUpdate={onNoteUpdate}
+              onNoteRemove={onNoteRemove}
               onStaffClick={hasResult ? onStaffClick : undefined}
               onSvgReady={onSheetSvgReady}
             />
