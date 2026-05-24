@@ -31,7 +31,8 @@ import {
   getInstrumentOptions,
   type PlaybackInstrumentId,
 } from '@/lib/music/partition-instruments';
-import { encodeShareUrl } from '@/lib/share';
+import { encodeShareUrl, decodeShareFromHash } from '@/lib/share';
+import { sessionCache } from '@/lib/sessionCache';
 import { exportPartitionToPdf } from '@/lib/pdf-export';
 import { cn } from '@/lib/utils';
 import type { DisplayNote } from '@/types/display';
@@ -121,6 +122,9 @@ export function MobileApp() {
   const [recStartTs, setRecStartTs] = useState<number>(0);
   const [recElapsed, setRecElapsed] = useState<number>(0);
   const [infoOpen, setInfoOpen] = useState(false);
+  // Gate persistence: don't write to IDB until we've finished reading from it,
+  // otherwise the initial empty state would clobber whatever was saved before.
+  const [restored, setRestored] = useState(false);
 
   const { start, stop, status, error, isRecording, analyserRef } = useAudioRecorder({
     click: false,
@@ -154,6 +158,57 @@ export function MobileApp() {
   useEffect(() => {
     if (error) toast.error('Erreur micro', { description: error });
   }, [error]);
+
+  // Restore on mount: shared link wins over the cached session.
+  useEffect(() => {
+    let cancelled = false;
+    async function restore() {
+      try {
+        if (typeof window !== 'undefined' && window.location.hash) {
+          const shared = decodeShareFromHash(window.location.hash);
+          if (shared && shared.tracks.length > 0) {
+            setTracks(shared.tracks);
+            (Object.keys(shared.metadata) as Array<keyof typeof shared.metadata>).forEach(
+              (k) => updateField(k, shared.metadata[k] as never),
+            );
+            setInstrument(shared.tracks[shared.tracks.length - 1].instrument);
+            setStage('result');
+            // Drop the hash so a manual reload restores from cache, not the link.
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+            return;
+          }
+        }
+        const cached = await sessionCache.load();
+        if (cancelled || !cached?.tracks?.length) return;
+        setTracks(cached.tracks);
+        setInstrument(cached.tracks[cached.tracks.length - 1].instrument);
+        setStage('result');
+      } catch (e) {
+        console.error('Failed to restore mobile session', e);
+      } finally {
+        if (!cancelled) setRestored(true);
+      }
+    }
+    restore();
+    return () => { cancelled = true; };
+  }, [setTracks, updateField]);
+
+  // Persist tracks whenever they change (after the initial restore completes).
+  // Clearing tracks wipes the cache so "Refaire" really resets the session.
+  useEffect(() => {
+    if (!restored) return;
+    if (tracks.length === 0) {
+      sessionCache.clear().catch(() => undefined);
+      return;
+    }
+    sessionCache
+      .save({
+        tracks,
+        options: DEFAULT_CLEANUP_OPTIONS,
+        createdAt: Date.now(),
+      })
+      .catch((e) => console.error('Failed to persist mobile session', e));
+  }, [tracks, restored]);
 
   // Wire up tracks → displayNotes for the partition preview.
   const displayNotes: DisplayNote[] = useMemo(() => {
