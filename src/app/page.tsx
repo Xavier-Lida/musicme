@@ -76,6 +76,13 @@ export default function Page() {
   });
   const stopPlaybackRef = useRef(playback.stop);
   stopPlaybackRef.current = playback.stop;
+  const pausePlaybackRef = useRef(playback.pause);
+  pausePlaybackRef.current = playback.pause;
+
+  const handleInstrumentChange = useCallback((id: PlaybackInstrumentId) => {
+    pausePlaybackRef.current();
+    setInstrument(id);
+  }, []);
 
   const updateNotes = useCallback((nextNotes: Note[], selected: number | null) => {
     setResult((prev) => (prev ? { ...prev, notes: nextNotes } : prev));
@@ -375,7 +382,7 @@ export default function Page() {
         onStartRecording={start}
         onStopRecording={handleStopRecording}
         onUploadAudio={handleUploadAudio}
-        onInstrumentChange={setInstrument}
+        onInstrumentChange={handleInstrumentChange}
         onPresetChange={handlePresetChange}
         onDeleteSelected={() =>
           selectedNoteIndex !== null && handleRemoveNote(selectedNoteIndex)

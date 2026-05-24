@@ -1,17 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef } from 'react';
-import { PlusIcon } from '@phosphor-icons/react';
-import { Button } from '@/components/ui/button';
-import { NotesTrack } from '@/components/timeline/NotesTrack';
 import { WaveformTrack } from '@/components/timeline/WaveformTrack';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 import { FIXED_BPM } from '@/types/transcription';
-import type { Note } from '@/types/transcription';
 import { cn } from '@/lib/utils';
 
 const TRACK_LABEL_WIDTH = 72;
@@ -21,12 +12,9 @@ const PIXELS_PER_SECOND = 80;
 const MEASURE_SECONDS = (60 / FIXED_BPM) * 4;
 
 interface AudioTimelineProps {
-  notes: Note[];
   peaks: number[];
   duration: number;
   currentTime: number;
-  selectedIndex?: number | null;
-  onNoteSelect?: (index: number) => void;
   onSeek?: (seconds: number) => void;
   className?: string;
 }
@@ -38,12 +26,9 @@ function formatTime(seconds: number): string {
 }
 
 export function AudioTimeline({
-  notes,
   peaks,
   duration,
   currentTime,
-  selectedIndex = null,
-  onNoteSelect,
   onSeek,
   className,
 }: AudioTimelineProps) {
@@ -139,43 +124,9 @@ export function AudioTimeline({
                 <WaveformTrack peaks={peaks} width={timelineWidth} height={TRACK_HEIGHT} />
               </div>
             </div>
-
-            <div className="flex">
-              <div
-                className="flex shrink-0 items-center border-r border-border bg-muted/50 px-2 text-xs text-muted-foreground"
-                style={{ width: TRACK_LABEL_WIDTH, height: TRACK_HEIGHT }}
-              >
-                Partition
-              </div>
-              <div
-                className="relative cursor-pointer"
-                style={{ width: timelineWidth, height: TRACK_HEIGHT }}
-                onClick={handleTimelineClick}
-                role="presentation"
-              >
-                <NotesTrack
-                  notes={notes}
-                  duration={duration}
-                  width={timelineWidth}
-                  height={TRACK_HEIGHT}
-                  selectedIndex={selectedIndex}
-                  onNoteSelect={onNoteSelect}
-                />
-              </div>
-            </div>
           </div>
         </div>
       </div>
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="outline" size="sm" disabled className="w-fit">
-            <PlusIcon data-icon="inline-start" />
-            Ajouter une piste
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Ajout de pistes — bientôt disponible</TooltipContent>
-      </Tooltip>
     </div>
   );
 }

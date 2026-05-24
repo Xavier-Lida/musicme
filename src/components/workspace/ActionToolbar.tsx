@@ -2,7 +2,6 @@
 
 import { useRef } from 'react';
 import {
-  CaretDownIcon,
   DotsThreeOutlineIcon,
   FileArrowUpIcon,
   MicrophoneIcon,
@@ -16,7 +15,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -25,6 +23,14 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import {
   getInstrumentLabel,
@@ -155,29 +161,23 @@ export function ActionToolbar({
           Téléverser partition
         </Button>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" disabled={playing}>
-              {getInstrumentLabel(instrument)}
-              <CaretDownIcon data-icon="inline-end" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuLabel>Instrument de lecture</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={instrument}
-              onValueChange={(value) => onInstrumentChange(value as PlaybackInstrumentId)}
-            >
-              <DropdownMenuGroup>
-                {INSTRUMENT_OPTIONS.map((id) => (
-                  <DropdownMenuRadioItem key={id} value={id}>
-                    {getInstrumentLabel(id)}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Select
+          value={instrument}
+          onValueChange={(value) => onInstrumentChange(value as PlaybackInstrumentId)}
+        >
+          <SelectTrigger className="w-[120px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {INSTRUMENT_OPTIONS.map((id) => (
+                <SelectItem key={id} value={id}>
+                  {getInstrumentLabel(id)}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -185,7 +185,7 @@ export function ActionToolbar({
               <DotsThreeOutlineIcon />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuContent align="end" side="top" sideOffset={8} className="w-56 min-w-48">
             <DropdownMenuGroup>
               <DropdownMenuItem
                 disabled={!hasSelectedNote || playing}

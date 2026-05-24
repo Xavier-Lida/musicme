@@ -45,6 +45,7 @@ export function useMelodyPlayback({
   });
 
   const playerRef = useRef<MelodyPlayer | null>(null);
+  const genRef = useRef(0);
   const notesRef = useRef(notes);
   const instrumentRef = useRef(instrument);
 
@@ -58,15 +59,26 @@ export function useMelodyPlayback({
   }, [duration]);
 
   const syncPlayer = useCallback(async () => {
+    const gen = ++genRef.current;
     playerRef.current?.dispose();
     playerRef.current = null;
 
     if (notesRef.current.length === 0) {
-      setState({ currentTime: 0, duration, isPlaying: false });
+      if (gen === genRef.current) {
+        setState({ currentTime: 0, duration, isPlaying: false });
+      }
       return;
     }
 
-    const player = await createMelodyPlayer(notesRef.current, instrumentRef.current, duration);
+    const player = await createMelodyPlayer(
+      notesRef.current,
+      instrumentRef.current,
+      duration,
+    );
+    if (gen !== genRef.current) {
+      player.dispose();
+      return;
+    }
     playerRef.current = player;
     player.subscribe((next) => setState(next));
   }, [duration]);

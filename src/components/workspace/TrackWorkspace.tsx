@@ -142,12 +142,9 @@ export function TrackWorkspace({
       </div>
 
       <AudioTimeline
-        notes={notes}
         peaks={peaks}
         duration={duration}
         currentTime={currentTime}
-        selectedIndex={selectedIndex}
-        onNoteSelect={onNoteSelect}
         onSeek={onSeek}
       />
     </div>

@@ -23,7 +23,7 @@ interface ProjectInfoPanelProps {
   className?: string;
 }
 
-const INSTRUMENT_OPTIONS = ['Piano', 'Guitare', 'Voix', 'Autre'];
+const INSTRUMENT_OPTIONS = ['Piano', 'Guitare', 'Autre'];
 
 export function ProjectInfoPanel({
   metadata,
@@ -60,7 +60,11 @@ export function ProjectInfoPanel({
           <Field>
             <FieldLabel htmlFor="project-instrument">Instrument</FieldLabel>
             <Select
-              value={metadata.instrument || undefined}
+              value={
+                INSTRUMENT_OPTIONS.includes(metadata.instrument)
+                  ? metadata.instrument
+                  : undefined
+              }
               onValueChange={(value) => onFieldChange('instrument', value)}
             >
               <SelectTrigger id="project-instrument" className="w-full">
