@@ -13,10 +13,12 @@ const SheetMusicRenderer = dynamic(() => import('@/components/SheetMusicRenderer
   ssr: false,
 });
 
+import type { CachedTrack } from '@/lib/sessionCache';
+
 interface TrackWorkspaceProps {
   className?: string;
   notes: Note[];
-  peaks: number[];
+  tracks: CachedTrack[];
   duration: number;
   currentTime: number;
   selectedIndex: number | null;
@@ -49,12 +51,14 @@ interface TrackWorkspaceProps {
   onOpenNoteEditor: () => void;
   onExportPdf: () => void;
   onSheetSvgReady?: (svg: SVGSVGElement | null) => void;
+  onToggleMute: (id: string) => void;
+  onDeleteTrack: (id: string) => void;
 }
 
 export function TrackWorkspace({
   className,
   notes,
-  peaks,
+  tracks,
   duration,
   currentTime,
   selectedIndex,
@@ -87,6 +91,8 @@ export function TrackWorkspace({
   onOpenNoteEditor,
   onExportPdf,
   onSheetSvgReady,
+  onToggleMute,
+  onDeleteTrack,
 }: TrackWorkspaceProps) {
   const sheetContainerRef = useRef<HTMLDivElement>(null);
   const [sheetWidth, setSheetWidth] = useState(800);
@@ -144,11 +150,13 @@ export function TrackWorkspace({
         />
 
         <AudioTimeline
-          peaks={peaks}
+          tracks={tracks}
           duration={duration}
           currentTime={currentTime}
           notes={notes}
           onSeek={onSeek}
+          onToggleMute={onToggleMute}
+          onDeleteTrack={onDeleteTrack}
         />
 
         {busy && (

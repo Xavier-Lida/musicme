@@ -8,6 +8,7 @@ interface WaveformTrackProps {
   width: number;
   height?: number;
   className?: string;
+  flat?: boolean;
 }
 
 export function WaveformTrack({
@@ -15,12 +16,13 @@ export function WaveformTrack({
   width,
   height = 56,
   className,
+  flat = false,
 }: WaveformTrackProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || peaks.length === 0) return;
+    if (!canvas) return;
 
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
@@ -35,8 +37,18 @@ export function WaveformTrack({
     ctx.clearRect(0, 0, width, height);
 
     const mid = height / 2;
-    const barWidth = width / peaks.length;
 
+    if (flat || peaks.length === 0) {
+      ctx.strokeStyle = 'oklch(0.556 0 0 / 30%)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, mid);
+      ctx.lineTo(width, mid);
+      ctx.stroke();
+      return;
+    }
+
+    const barWidth = width / peaks.length;
     ctx.fillStyle = 'oklch(0.556 0 0 / 60%)';
     for (let i = 0; i < peaks.length; i++) {
       const peak = peaks[i];
@@ -44,21 +56,7 @@ export function WaveformTrack({
       const x = i * barWidth;
       ctx.fillRect(x, mid - barHeight / 2, Math.max(1, barWidth - 0.5), barHeight);
     }
-  }, [peaks, width, height]);
-
-  if (peaks.length === 0) {
-    return (
-      <div
-        className={cn(
-          'flex items-center justify-center text-xs text-muted-foreground',
-          className,
-        )}
-        style={{ width, height }}
-      >
-        Aucun audio
-      </div>
-    );
-  }
+  }, [peaks, width, height, flat]);
 
   return (
     <canvas

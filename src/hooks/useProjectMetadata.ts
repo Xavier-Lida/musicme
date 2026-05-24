@@ -5,13 +5,13 @@ import { useState } from 'react';
 export interface ProjectMetadata {
   name: string;
   author: string;
-  instrument: string;
+  instruments: string[]; // multi-select — was instrument: string
 }
 
 const DEFAULT_METADATA: ProjectMetadata = {
   name: '',
   author: '',
-  instrument: '',
+  instruments: [],
 };
 
 export function useProjectMetadata(initial: Partial<ProjectMetadata> = {}) {

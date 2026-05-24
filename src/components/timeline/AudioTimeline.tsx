@@ -5,19 +5,22 @@ import { WaveformTrack } from '@/components/timeline/WaveformTrack';
 import { FIXED_BPM } from '@/types/transcription';
 import type { Note } from '@/types/transcription';
 import { cn } from '@/lib/utils';
+import type { CachedTrack } from '@/lib/sessionCache';
+import { SpeakerHigh, SpeakerSlash, Trash } from '@phosphor-icons/react';
 
 const TRACK_LABEL_WIDTH = 80;
-const RULER_HEIGHT = 22;
 const TRACK_HEIGHT = 54;
 const PIXELS_PER_SECOND = 80;
 const MEASURE_SECONDS = (60 / FIXED_BPM) * 4;
 
 interface AudioTimelineProps {
-  peaks: number[];
+  tracks: CachedTrack[];
   duration: number;
   currentTime: number;
   notes?: Note[];
   onSeek?: (seconds: number) => void;
+  onToggleMute?: (id: string) => void;
+  onDeleteTrack?: (id: string) => void;
   className?: string;
 }
 
@@ -28,11 +31,13 @@ function formatTime(seconds: number): string {
 }
 
 export function AudioTimeline({
-  peaks,
+  tracks,
   duration,
   currentTime,
   notes = [],
   onSeek,
+  onToggleMute,
+  onDeleteTrack,
   className,
 }: AudioTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -102,25 +107,78 @@ export function AudioTimeline({
               style={{ left: TRACK_LABEL_WIDTH + playheadLeft }}
             />
 
-            {/* Track 1: Audio Waveform */}
-            <div className="daw-track-row">
-              <div className="daw-track-label">
-                <span className="daw-track-dot bg-cyan-400" />
-                Audio
+            {/* Audio Tracks */}
+            {tracks.map((track) => (
+              <div key={track.id} className="daw-track-row">
+                <div className="daw-track-label flex flex-col justify-between py-1.5 px-2 h-full border-r border-border bg-background/50 select-none">
+                  <span className="font-semibold text-[10px] text-muted-foreground truncate w-full" title={track.name}>
+                    {track.name}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleMute?.(track.id);
+                      }}
+                      className={cn(
+                        'p-0.5 rounded hover:bg-muted transition-colors',
+                        track.muted ? 'text-red-500' : 'text-muted-foreground hover:text-foreground'
+                      )}
+                      title={track.muted ? 'Activer le son' : 'Couper le son'}
+                    >
+                      {track.muted ? <SpeakerSlash className="size-3.5" /> : <SpeakerHigh className="size-3.5" />}
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(`Supprimer la piste "${track.name}" ?`)) {
+                          onDeleteTrack?.(track.id);
+                        }
+                      }}
+                      className="p-0.5 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors"
+                      title="Supprimer la piste"
+                    >
+                      <Trash className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <div
+                  className={cn('daw-track-lane relative', track.muted && 'opacity-40')}
+                  onClick={handleTimelineClick}
+                  role="presentation"
+                >
+                  <WaveformTrack
+                    peaks={track.peaks}
+                    width={timelineWidth}
+                    height={TRACK_HEIGHT}
+                    flat={notes.length === 0} // no waveform amplitude if no notes
+                  />
+                </div>
               </div>
-              <div
-                className="daw-track-lane"
-                onClick={handleTimelineClick}
-                role="presentation"
-              >
-                <WaveformTrack peaks={peaks} width={timelineWidth} height={TRACK_HEIGHT} />
+            ))}
+
+            {/* Default Empty Audio Track if none exists */}
+            {tracks.length === 0 && (
+              <div className="daw-track-row">
+                <div className="daw-track-label flex flex-col justify-center py-1.5 px-2 h-full border-r border-border bg-background/50">
+                  <span className="font-semibold text-[10px] text-muted-foreground truncate w-full">
+                    Audio
+                  </span>
+                </div>
+                <div
+                  className="daw-track-lane relative flex items-center justify-center text-xs text-muted-foreground/60"
+                  onClick={handleTimelineClick}
+                  role="presentation"
+                >
+                  Glissez un fichier audio ou enregistrez pour commencer
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Track 2: MIDI Notes representation */}
             <div className="daw-track-row">
               <div className="daw-track-label">
-                <span className="daw-track-dot bg-purple-500" />
+                <span className="daw-track-dot bg-purple-500 animate-pulse" />
                 Notes MIDI
               </div>
               <div className="daw-track-lane relative" onClick={handleTimelineClick} role="presentation">
@@ -130,7 +188,7 @@ export function AudioTimeline({
                   return (
                     <div
                       key={index}
-                      className="daw-track-clip bg-purple-500/40 border border-purple-500/60"
+                      className="daw-track-clip bg-purple-500/40 border border-purple-500/60 rounded text-[9px] font-mono flex items-center justify-center overflow-hidden"
                       style={{
                         left: noteLeft,
                         width: Math.max(12, noteWidth),

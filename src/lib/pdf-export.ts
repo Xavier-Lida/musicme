@@ -35,7 +35,7 @@ export async function exportPartitionToPdf({
 
   const title = metadata.name.trim() || 'Sans titre';
   const author = metadata.author.trim();
-  const instrument = metadata.instrument.trim();
+  const instruments = (metadata.instruments ?? []).join(', ');
 
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(18);
@@ -48,7 +48,7 @@ export async function exportPartitionToPdf({
 
   const metaParts: string[] = [];
   if (author) metaParts.push(`Auteur : ${author}`);
-  if (instrument) metaParts.push(`Instrument : ${instrument}`);
+  if (instruments) metaParts.push(`Instruments : ${instruments}`);
   if (metaParts.length > 0) {
     pdf.text(metaParts.join('   •   '), MARGIN_PT, MARGIN_PT + 24);
   }

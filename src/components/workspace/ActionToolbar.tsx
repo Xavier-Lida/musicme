@@ -89,9 +89,12 @@ export function ActionToolbar({
 
   return (
     <div className={cn('daw-track-toolbar', className)}>
-      <div className="daw-track-toolbar-label">Pistes</div>
+      {/* Left spacer — symmetric width keeps buttons centered */}
+      <div className="w-[80px] shrink-0 flex items-center">
+        <span className="daw-track-toolbar-label text-xs font-semibold text-muted-foreground truncate">Pistes</span>
+      </div>
 
-      {/* Centered actions container */}
+      {/* Centered button group */}
       <div className="flex flex-1 items-center justify-center gap-3">
         {!isRecording ? (
           <Button
@@ -198,6 +201,8 @@ export function ActionToolbar({
           </AlertDialogContent>
         </AlertDialog>
       </div>
+      {/* Right spacer to balance the left spacer */}
+      <div className="w-[80px] shrink-0" aria-hidden="true" />
     </div>
   );
 }

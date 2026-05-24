@@ -23,11 +23,30 @@ interface AppHeaderProps {
     key: K,
     value: ProjectMetadata[K],
   ) => void;
+  showMobileMenu?: boolean;
+  onOpenDrawer?: () => void;
 }
 
-export function AppHeader({ className, metadata, onFieldChange }: AppHeaderProps) {
+export function AppHeader({
+  className,
+  metadata,
+  onFieldChange,
+  showMobileMenu,
+  onOpenDrawer,
+}: AppHeaderProps) {
   return (
     <header className={cn('daw-header', className)}>
+      {showMobileMenu && (
+        <button
+          type="button"
+          className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+          onClick={onOpenDrawer}
+          aria-label="Menu"
+        >
+          ☰
+        </button>
+      )}
+
       <div className="daw-logo" aria-hidden="true">M</div>
       <span className="daw-header-title">MusicMe</span>
       <p className="daw-header-subtitle">

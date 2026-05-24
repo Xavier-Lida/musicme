@@ -9,10 +9,12 @@ import {
 import type { PlaybackInstrumentId } from '@/lib/music/partition-instruments';
 import type { Note } from '@/types/transcription';
 
+import type { CachedTrack } from '@/lib/sessionCache';
+
 interface UseMelodyPlaybackOptions {
   notes: Note[];
   instrument: PlaybackInstrumentId;
-  audioDuration?: number;
+  tracks?: CachedTrack[];
 }
 
 interface UseMelodyPlaybackResult {
@@ -36,11 +38,14 @@ function computeDuration(notes: Note[], audioDuration = 0): number {
 export function useMelodyPlayback({
   notes,
   instrument,
-  audioDuration = 0,
+  tracks = [],
 }: UseMelodyPlaybackOptions): UseMelodyPlaybackResult {
+  const maxAudioDuration = tracks.length > 0 ? Math.max(...tracks.map((t) => t.duration)) : 0;
+  const duration = computeDuration(notes, maxAudioDuration);
+
   const [state, setState] = useState<MelodyPlayerState>({
     currentTime: 0,
-    duration: computeDuration(notes, audioDuration),
+    duration,
     isPlaying: false,
   });
 
@@ -52,8 +57,6 @@ export function useMelodyPlayback({
   notesRef.current = notes;
   instrumentRef.current = instrument;
 
-  const duration = computeDuration(notes, audioDuration);
-
   useEffect(() => {
     setState((prev) => ({ ...prev, duration }));
   }, [duration]);
@@ -63,7 +66,8 @@ export function useMelodyPlayback({
     playerRef.current?.dispose();
     playerRef.current = null;
 
-    if (notesRef.current.length === 0) {
+    const hasUnmutedTracks = tracks.some((t) => !t.muted);
+    if (notesRef.current.length === 0 && !hasUnmutedTracks) {
       if (gen === genRef.current) {
         setState({ currentTime: 0, duration, isPlaying: false });
       }
@@ -74,6 +78,7 @@ export function useMelodyPlayback({
       notesRef.current,
       instrumentRef.current,
       duration,
+      tracks,
     );
     if (gen !== genRef.current) {
       player.dispose();
@@ -81,7 +86,7 @@ export function useMelodyPlayback({
     }
     playerRef.current = player;
     player.subscribe((next) => setState(next));
-  }, [duration]);
+  }, [duration, tracks]);
 
   useEffect(() => {
     syncPlayer();
@@ -89,14 +94,15 @@ export function useMelodyPlayback({
       playerRef.current?.dispose();
       playerRef.current = null;
     };
-  }, [syncPlayer, instrument, notes]);
+  }, [syncPlayer, instrument, notes, tracks]);
 
   const play = useCallback(async () => {
-    if (!playerRef.current && notes.length > 0) {
+    const hasUnmutedTracks = tracks.some((t) => !t.muted);
+    if (!playerRef.current && (notes.length > 0 || hasUnmutedTracks)) {
       await syncPlayer();
     }
     await playerRef.current?.play();
-  }, [notes.length, syncPlayer]);
+  }, [notes.length, syncPlayer, tracks]);
 
   const pause = useCallback(() => {
     playerRef.current?.pause();

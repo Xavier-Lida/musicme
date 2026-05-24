@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/layout/AppShell';
+import { ProjectInfoPanel } from '@/components/project/ProjectInfoPanel';
 import { TrackWorkspace } from '@/components/workspace/TrackWorkspace';
 import NoteEditor from '@/components/NoteEditor';
 import {
@@ -13,6 +14,7 @@ import {
 } from '@/components/ui/sheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
+import { useAudioTracks } from '@/hooks/useAudioTracks';
 import { useMelodyPlayback } from '@/hooks/useMelodyPlayback';
 import { useProjectMetadata } from '@/hooks/useProjectMetadata';
 import {
@@ -54,9 +56,14 @@ export default function Page() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<TranscriptionResult | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
-  const [lastWav, setLastWav] = useState<Blob | null>(null);
-  const [audioDuration, setAudioDuration] = useState(0);
-  const [waveformPeaks, setWaveformPeaks] = useState<number[]>([]);
+  const {
+    tracks,
+    setTracks,
+    addTrack,
+    deleteTrack,
+    toggleMute,
+    clearTracks,
+  } = useAudioTracks();
   const [instrument, setInstrument] = useState<PlaybackInstrumentId>('piano');
   const [selectedNoteIndex, setSelectedNoteIndex] = useState<number | null>(null);
   const [cleanupOptions, setCleanupOptions] = useState<CleanupOptions>(DEFAULT_CLEANUP_OPTIONS);
@@ -101,7 +108,7 @@ export default function Page() {
   const playback = useMelodyPlayback({
     notes: playbackNotes,
     instrument,
-    audioDuration,
+    tracks,
   });
   const stopPlaybackRef = useRef(playback.stop);
   stopPlaybackRef.current = playback.stop;
@@ -163,29 +170,14 @@ export default function Page() {
     updateNotes([...originalNotesRef.current], null);
   }, [result, updateNotes]);
 
-  const updateAudioAssets = useCallback(async (wav: Blob) => {
-    setLastWav(wav);
-    try {
-      const [duration, peaks] = await Promise.all([
-        decodeAudioDuration(wav),
-        extractWaveformPeaks(wav),
-      ]);
-      setAudioDuration(duration);
-      setWaveformPeaks(peaks);
-    } catch {
-      setAudioDuration(0);
-      setWaveformPeaks([]);
-    }
-  }, []);
-
   const processTranscription = useCallback(
-    async (wav: Blob) => {
+    async (wav: Blob, name: string) => {
       setBusy(true);
       setApiError(null);
       stopPlaybackRef.current();
 
       try {
-        await updateAudioAssets(wav);
+        const newTrack = await addTrack(wav, name);
         const transcription = await transcribeAudio(wav, cleanupOptions);
         const sortedNotes = sortNotesByStart(transcription.notes);
         const rawNotes = transcription.raw_notes;
@@ -197,8 +189,12 @@ export default function Page() {
         setRecleanupAvailable(hasRawNotes);
         setSelectedNoteIndex(null);
 
+        const cached = await sessionCache.load();
+        const existingTracks = cached?.tracks || [];
+        const nextTracks = [...existingTracks, newTrack];
+
         await sessionCache.save({
-          audio: wav,
+          tracks: nextTracks,
           rawNotes: effectiveRaw,
           cleanedNotes: sortedNotes,
           options: cleanupOptions,
@@ -212,7 +208,7 @@ export default function Page() {
         setBusy(false);
       }
     },
-    [cleanupOptions, updateAudioAssets],
+    [cleanupOptions, addTrack],
   );
 
   useEffect(() => {
@@ -226,7 +222,22 @@ export default function Page() {
           return;
         }
 
-        await updateAudioAssets(cached.audio);
+        if (cached.tracks && cached.tracks.length > 0) {
+          setTracks(cached.tracks);
+        } else if (cached.audio) {
+          const duration = await decodeAudioDuration(cached.audio);
+          const peaks = await extractWaveformPeaks(cached.audio);
+          const legacyTrack = {
+            id: 'legacy-track',
+            name: 'Piste Audio',
+            blob: cached.audio,
+            peaks,
+            duration,
+            muted: false,
+          };
+          setTracks([legacyTrack]);
+        }
+
         setCleanupOptions(cached.options);
         const sorted = sortNotesByStart(cached.cleanedNotes);
         originalNotesRef.current = sorted;
@@ -252,7 +263,7 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, [updateAudioAssets]);
+  }, [setTracks]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -274,16 +285,43 @@ export default function Page() {
     }
   }, [error]);
 
+  const handleToggleMute = useCallback(
+    async (id: string) => {
+      toggleMute(id);
+      const cached = await sessionCache.load();
+      if (cached) {
+        const nextTracks = (cached.tracks || []).map((t) =>
+          t.id === id ? { ...t, muted: !t.muted } : t
+        );
+        await sessionCache.save({ ...cached, tracks: nextTracks });
+      }
+    },
+    [toggleMute],
+  );
+
+  const handleDeleteTrack = useCallback(
+    async (id: string) => {
+      deleteTrack(id);
+      const cached = await sessionCache.load();
+      if (cached) {
+        const nextTracks = (cached.tracks || []).filter((t) => t.id !== id);
+        await sessionCache.save({ ...cached, tracks: nextTracks });
+      }
+    },
+    [deleteTrack],
+  );
+
   async function handleStopRecording() {
     const blob = await stop();
     if (!blob) return;
     const wav = await blobToWav(blob);
-    await processTranscription(wav);
+    const trackIndex = tracks.length + 1;
+    await processTranscription(wav, `Enregistrement ${trackIndex}`);
   }
 
   async function handleUploadAudio(file: File) {
     const wav = file.type.includes('wav') ? file : await blobToWav(file);
-    await processTranscription(wav);
+    await processTranscription(wav, file.name);
   }
 
   const handlePresetChange = useCallback(
@@ -336,15 +374,14 @@ export default function Page() {
   async function handleClearSession() {
     playback.stop();
     await sessionCache.clear();
-    setLastWav(null);
-    setAudioDuration(0);
-    setWaveformPeaks([]);
+    clearTracks();
     setResult(null);
     setCleanupOptions(DEFAULT_CLEANUP_OPTIONS);
     setRecleanupAvailable(false);
     originalNotesRef.current = null;
     setSelectedNoteIndex(null);
     setApiError(null);
+    toast.success('Session réinitialisée');
   }
 
   async function handleDownloadMidi() {
@@ -359,11 +396,12 @@ export default function Page() {
   }
 
   function handleDownloadRecording() {
-    if (!lastWav) return;
-    const url = URL.createObjectURL(lastWav);
+    const firstTrack = tracks[0];
+    if (!firstTrack) return;
+    const url = URL.createObjectURL(firstTrack.blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `enregistrement-${Date.now()}.wav`;
+    a.download = `${firstTrack.name || 'enregistrement'}-${Date.now()}.wav`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -391,6 +429,9 @@ export default function Page() {
     <AppShell
       metadata={metadata}
       onFieldChange={updateField}
+      infoPanel={
+        <ProjectInfoPanel metadata={metadata} onFieldChange={updateField} />
+      }
       transport={{
         isPlaying: playback.isPlaying,
         disabled: transportDisabled,
@@ -402,14 +443,6 @@ export default function Page() {
         statusClass,
       }}
     >
-      {sessionRestored && !recleanupAvailable && result && (
-        <Alert>
-          <AlertDescription>
-            Les presets nécessitent une API à jour (raw_notes + /api/recleanup).
-          </AlertDescription>
-        </Alert>
-      )}
-
       {apiError && (
         <Alert variant="destructive">
           <AlertDescription>{apiError}</AlertDescription>
@@ -419,7 +452,7 @@ export default function Page() {
       <TrackWorkspace
         notes={notes}
         timelineDuration={playback.duration}
-        peaks={waveformPeaks}
+        tracks={tracks}
         duration={playback.duration}
         currentTime={playback.currentTime}
         selectedIndex={selectedNoteIndex}
@@ -432,7 +465,7 @@ export default function Page() {
         presetPickerDisabled={presetPickerDisabled}
         recleanupAvailable={recleanupAvailable}
         hasResult={!!result}
-        hasRecording={!!lastWav}
+        hasRecording={tracks.length > 0}
         notesEdited={!!notesEdited}
         onNoteSelect={setSelectedNoteIndex}
         onStaffClick={handleStaffClick}
@@ -453,6 +486,8 @@ export default function Page() {
         onOpenNoteEditor={() => setNoteEditorOpen(true)}
         onExportPdf={handleExportPdf}
         onSheetSvgReady={handleSheetSvgReady}
+        onToggleMute={handleToggleMute}
+        onDeleteTrack={handleDeleteTrack}
       />
 
       <Sheet open={noteEditorOpen} onOpenChange={setNoteEditorOpen}>
